@@ -20,8 +20,12 @@ This repository contains the source code for the current Vortek/ExynosTools laye
 The main target is Samsung Xclipse hardware:
 
 - Xclipse 920
-- Xclipse 930
 - Xclipse 940
+- Xclipse 950
+- Xclipse 960
+- Xclipse 530
+- Xclipse 540
+- Xclipse 550
 - Future Xclipse/RDNA-derived Samsung GPUs where the same Vulkan behavior applies
 
 The layer detects Xclipse devices by device name and vendor/driver information. Some generic Android-driver quirks are included, but the main compatibility path is designed for Samsung Xclipse.

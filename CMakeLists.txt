@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(ExynosToolsLayer LANGUAGES C CXX)
+project(VortekXclipseLayer LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -73,10 +73,17 @@ if(NOT EXYNOS_VULKAN_INCLUDE_DIR)
 endif()
 
 set(EXYNOS_VULKAN_UTILITY_INCLUDE_DIR "")
+set(EXYNOS_VULKAN_UTILITY_SRC_DIR "")
 if(EXYNOS_LAYER_USE_SUBMODULE_DEPS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/Vulkan-Utility-Libraries/include")
     set(EXYNOS_VULKAN_UTILITY_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/Vulkan-Utility-Libraries/include")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/Vulkan-Utility-Libraries/src/vulkan")
+        set(EXYNOS_VULKAN_UTILITY_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/Vulkan-Utility-Libraries/src/vulkan")
+    endif()
 elseif(EXYNOS_LAYER_USE_LOCAL_VULKAN_REPOS AND EXISTS "${EXYNOS_VULKAN_REPOS_ROOT}/Vulkan-Utility-Libraries/include")
     set(EXYNOS_VULKAN_UTILITY_INCLUDE_DIR "${EXYNOS_VULKAN_REPOS_ROOT}/Vulkan-Utility-Libraries/include")
+    if(EXISTS "${EXYNOS_VULKAN_REPOS_ROOT}/Vulkan-Utility-Libraries/src/vulkan")
+        set(EXYNOS_VULKAN_UTILITY_SRC_DIR "${EXYNOS_VULKAN_REPOS_ROOT}/Vulkan-Utility-Libraries/src/vulkan")
+    endif()
 endif()
 
 if(ANDROID)
@@ -84,47 +91,81 @@ if(ANDROID)
     find_library(ANDROID_VULKAN_LIB vulkan REQUIRED)
 endif()
 
-add_library(VkLayer_ExynosTools SHARED
+add_library(VkLayer_VortekXclipse SHARED
+    src/layer/layer_bcn_cpu_decoder.cpp
     src/layer/layer_entry.cpp
+    src/layer/layer_copy_image_routing.cpp
+    src/layer/layer_command_buffer_hooks.cpp
+    src/layer/layer_command_buffer_ownership.cpp
+    src/layer/layer_command_buffer_resources.cpp
+    src/layer/layer_compute_runtime.cpp
+    src/layer/layer_descriptor_write_builder.cpp
+    src/layer/layer_global_state.cpp
+    src/layer/layer_image_virtualization.cpp
+    src/layer/layer_format_virtualization.cpp
+    src/layer/layer_pipeline_selection.cpp
+    src/layer/layer_settings_utils.cpp
+    src/layer/layer_settings_runtime.cpp
+    src/layer/layer_telemetry.cpp
+    src/layer/layer_staging_allocations.cpp
+    src/layer/layer_vk_struct_clone.cpp
+    src/layer/layer_vma_runtime.cpp
 )
 
-set_target_properties(VkLayer_ExynosTools PROPERTIES
+if(EXYNOS_VULKAN_UTILITY_SRC_DIR)
+    target_sources(VkLayer_VortekXclipse PRIVATE
+        "${EXYNOS_VULKAN_UTILITY_SRC_DIR}/vk_safe_struct_core.cpp"
+        "${EXYNOS_VULKAN_UTILITY_SRC_DIR}/vk_safe_struct_ext.cpp"
+        "${EXYNOS_VULKAN_UTILITY_SRC_DIR}/vk_safe_struct_khr.cpp"
+        "${EXYNOS_VULKAN_UTILITY_SRC_DIR}/vk_safe_struct_manual.cpp"
+        "${EXYNOS_VULKAN_UTILITY_SRC_DIR}/vk_safe_struct_utils.cpp"
+        "${EXYNOS_VULKAN_UTILITY_SRC_DIR}/vk_safe_struct_vendor.cpp"
+    )
+else()
+    message(FATAL_ERROR
+        "Vulkan-Utility-Libraries safe struct sources are required for pNext-safe image virtualization.\n"
+        "Provide Vulkan-Utility-Libraries with src/vulkan available."
+    )
+endif()
+
+set_target_properties(VkLayer_VortekXclipse PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
 )
 if((CMAKE_SYSTEM_NAME STREQUAL "Android" OR (UNIX AND NOT APPLE)) AND
    CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    target_link_options(VkLayer_ExynosTools PRIVATE
+    target_link_options(VkLayer_VortekXclipse PRIVATE
         "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports.map"
     )
 endif()
 
-target_include_directories(VkLayer_ExynosTools PRIVATE
+target_include_directories(VkLayer_VortekXclipse PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/bcdec"
     "${EXYNOS_VULKAN_INCLUDE_DIR}"
 )
 if(EXYNOS_VULKAN_UTILITY_INCLUDE_DIR)
-    target_include_directories(VkLayer_ExynosTools PRIVATE "${EXYNOS_VULKAN_UTILITY_INCLUDE_DIR}")
+    target_include_directories(VkLayer_VortekXclipse PRIVATE "${EXYNOS_VULKAN_UTILITY_INCLUDE_DIR}")
 endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/VulkanMemoryAllocator/include")
-    target_include_directories(VkLayer_ExynosTools PRIVATE
+    target_include_directories(VkLayer_VortekXclipse PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/external/VulkanMemoryAllocator/include"
     )
 endif()
 
 if(ANDROID)
-    target_link_libraries(VkLayer_ExynosTools PRIVATE
+    target_link_libraries(VkLayer_VortekXclipse PRIVATE
         ${ANDROID_VULKAN_LIB}
         ${ANDROID_LOG_LIB}
     )
 else()
     find_package(Vulkan REQUIRED)
-    target_link_libraries(VkLayer_ExynosTools PRIVATE Vulkan::Vulkan)
+    target_link_libraries(VkLayer_VortekXclipse PRIVATE Vulkan::Vulkan)
 endif()
 
-set(LAYER_MANIFEST_OUT "${CMAKE_CURRENT_BINARY_DIR}/VkLayer_exynostools.json")
+set(LAYER_MANIFEST_OUT "${CMAKE_CURRENT_BINARY_DIR}/VkLayer_vortek_xclipse.json")
 configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/VkLayer_exynostools.json.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/VkLayer_vortek_xclipse.json.in"
     "${LAYER_MANIFEST_OUT}"
     @ONLY
 )
@@ -140,9 +181,20 @@ if(EXYNOS_LAYER_BUILD_SHADERS)
             shaders/bc6_iv.comp
             shaders/bc7.comp
             shaders/bc7_iv.comp
-            shaders/copy_image_iv.comp
+            shaders/copy_image_iv_r8.comp
+            shaders/copy_image_iv_r8_snorm.comp
+            shaders/copy_image_iv_rg8.comp
+            shaders/copy_image_iv_rg8_snorm.comp
+            shaders/copy_image_iv_rgba8.comp
+            shaders/copy_image_iv_rgba8_snorm.comp
+            shaders/copy_image_iv_rgba16f.comp
             shaders/rgtc.comp
-            shaders/rgtc_iv.comp
+            shaders/rgtc_iv_r8.comp
+            shaders/rgtc_iv_r8_snorm.comp
+            shaders/rgtc_iv_rg8.comp
+            shaders/rgtc_iv_rg8_snorm.comp
+            shaders/rgtc_iv_rgba8.comp
+            shaders/rgtc_iv_rgba8_snorm.comp
             shaders/s3tc.comp
             shaders/s3tc_iv.comp
         )
@@ -179,8 +231,8 @@ if(EXYNOS_LAYER_BUILD_SHADERS)
                 VERBATIM
             )
             add_custom_target(exynostools_embedded_shaders ALL DEPENDS "${EMBEDDED_SHADER_HEADER}")
-            add_dependencies(VkLayer_ExynosTools exynostools_embedded_shaders)
-            target_include_directories(VkLayer_ExynosTools PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+            add_dependencies(VkLayer_VortekXclipse exynostools_embedded_shaders)
+            target_include_directories(VkLayer_VortekXclipse PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
         endif()
     else()
         if(EXYNOS_LAYER_EMBED_SHADERS)

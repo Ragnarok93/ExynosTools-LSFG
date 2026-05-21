@@ -1,0 +1,10 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+#include "rgtc.h"
+
+layout(set = 0, binding = 0, r8) uniform writeonly image2D uOutput;
+
+#define RGTC_STORE_PIXEL(dst, rg) imageStore(uOutput, dst, vec4((rg).x, 0.0, 0.0, 1.0))
+#include "rgtc_iv_main.h"

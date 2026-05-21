@@ -1,0 +1,59 @@
+ExynosTools V3.1 VORTEK UPDATE (2026-04-20)
+
+Core goals:
+- Keep the Vulkan Layer architecture stable while making the internals more driver-like.
+- Reduce CPU overhead in hot paths without expanding scope into a custom IPC/ICD design.
+- Reuse the best lightweight ideas inspired by Vortek while staying in-process.
+
+What was added:
+- Persistent pipeline cache support for compute pipelines.
+- Pipeline prewarm at device bring-up to reduce first-use stutter.
+- Descriptor set reuse and cache-by-resource-key for decode and special copy paths.
+- Descriptor write builder shared across classic descriptor updates and descriptor-buffer path.
+- Synchronization2 path for compute/image barriers when available, with legacy fallback.
+- Descriptor buffer fast path fully wired into device creation and runtime use.
+- GPU microbenchmark support with CPU/GPU timing buckets per shader kind.
+- Wave32/Wave64 pipeline variants prepared for future tuning work.
+
+What was optimized:
+- Persistent staging suballocation system with reusable chunks instead of one-off staging buffers.
+- Unlimited staging cache retention mode for aggressive reuse in heavy workloads.
+- Lighter command buffer reset path by deferring cleanup to cheaper points.
+- Recycled GPU timestamp query pools for benchmarking instead of creating/destroying every time.
+- Recycled command-buffer resource vectors for staging allocations and tracked descriptor sets.
+- Temporary arena for CopyImage2 / CopyBufferToImage2 region conversion to avoid per-call vector churn.
+
+Architecture and maintenance improvements:
+- `pNext` utilities extracted into a shared helper module.
+- Descriptor write construction extracted into its own runtime helper.
+- `layer_entry.cpp` reduced further by moving repeated Vulkan structure handling into shared modules.
+- More consistent internal pooling patterns inspired by Vortek object/pool design, but adapted to ExynosTools.
+
+What was intentionally not added in 3.1:
+- No client/server Vulkan IPC architecture.
+- No giant Vulkan serializer import.
+- No ACO/RADV-style backend experiments.
+- No async compute rewrite yet.
+
+Release focus:
+- Better frame pacing.
+- Lower descriptor/staging churn.
+- Cleaner internal architecture for future 3.2+ work.
+
+BCN DIAG UPDATE (2026-04-29)
+
+Stability and texture correctness:
+- Decode now tracks SRGB/UNORM view usage and uses the selected decode format when uploading BCn data.
+- BCn 3D images can be virtualized through 2D-array-compatible replacement images.
+- Buffer-to-image uploads with depth > 1 are split into per-slice decode work for 3D images.
+- Native copy/blit fallback is blocked when virtualized images have incompatible real formats and no translated path succeeds.
+
+Diagnostics:
+- Virtualized image logs now include format, replacement, type, extent, mip count, layer count, usage, and flags.
+- BCn stats now include per-format counters for BC1/BC2/BC3/BC4/BC5/BC6/BC7 plus SRGB.
+- Added decode counters for SRGB paths, 3D slices, and blocked incompatible virtual transfers.
+- Compute runtime logs how many BCn/copy pipelines were prewarmed.
+
+New setting:
+- safety.block_incompatible_virtual_copies = 1 by default.
+- Set it to 0 only for testing if a game needs the old native fallback behavior.

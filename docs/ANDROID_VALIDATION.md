@@ -12,15 +12,13 @@ Artifacts:
 
 - `build-android/libVkLayer_ExynosTools.so`
 - `build-android/VkLayer_exynostools.json`
-- `build-android/shaders/*.spv`
 
 ## 2) Push files to device
 
 ```powershell
-adb shell mkdir -p /data/local/tmp/exynostools/shaders
 adb push build-android/libVkLayer_ExynosTools.so /data/local/tmp/exynostools/
 adb push build-android/VkLayer_exynostools.json /data/local/tmp/exynostools/
-adb push build-android/shaders/*.spv /data/local/tmp/exynostools/shaders/
+adb push exynostools_config.ini /data/local/tmp/exynostools/
 ```
 
 ## 3) Enable validation + ExynosTools layer
@@ -31,6 +29,9 @@ adb shell setprop debug.vulkan.layers VK_LAYER_KHRONOS_validation:VK_LAYER_EXYNO
 ```
 
 Restart the target app after changing properties.
+
+Optional: configure the layer either with `exynostools_config.ini` or
+programmatically through `VK_EXT_layer_settings`.
 
 ## 4) Inspect logs
 
@@ -47,4 +48,3 @@ If you see `VUID-*` messages, fix them before large game tests.
 adb shell setprop debug.vulkan.layers ""
 adb shell setprop debug.vulkan.layer_path ""
 ```
-

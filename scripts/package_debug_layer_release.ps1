@@ -1,7 +1,7 @@
 param(
     [string]$RepoRoot = (Resolve-Path "$PSScriptRoot\..").Path,
     [string]$BuildDir = "build-android",
-    [string]$ReleaseName = "ExynosTools_V3.0_STABLE_DRIVER",
+    [string]$ReleaseName = "ExynosTools_V3.0_STABLE_DEBUG_LAYER",
     [string]$DesktopDir = "$env:USERPROFILE\Desktop"
 )
 
@@ -9,8 +9,14 @@ $ErrorActionPreference = "Stop"
 
 $buildPath = Join-Path $RepoRoot $BuildDir
 $soPath = Join-Path $buildPath "libVkLayer_ExynosTools.so"
+$jsonPath = Join-Path $buildPath "VkLayer_exynostools.json"
+$readmePath = Join-Path $RepoRoot "docs\ANDROID_VALIDATION.md"
+
 if (-not (Test-Path $soPath)) {
     throw "Missing .so: $soPath. Build first with scripts/configure_android_local_repos.ps1"
+}
+if (-not (Test-Path $jsonPath)) {
+    throw "Missing layer manifest: $jsonPath. Re-run CMake configure/generate first."
 }
 
 $releaseDir = Join-Path $DesktopDir $ReleaseName
@@ -24,14 +30,15 @@ if (Test-Path $zipPath) {
 }
 
 New-Item -ItemType Directory -Path $releaseDir | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $releaseDir "lib\arm64-v8a") -Force | Out-Null
 
-Copy-Item -LiteralPath (Join-Path $RepoRoot "CHANGELOG_V3.0.txt") -Destination (Join-Path $releaseDir "CHANGELOG_V3.0.txt")
+Copy-Item -LiteralPath $soPath -Destination (Join-Path $releaseDir "libVkLayer_ExynosTools.so")
+Copy-Item -LiteralPath $jsonPath -Destination (Join-Path $releaseDir "VkLayer_exynostools.json")
 Copy-Item -LiteralPath (Join-Path $RepoRoot "exynostools_config.ini") -Destination (Join-Path $releaseDir "exynostools_config.ini")
-Copy-Item -LiteralPath (Join-Path $RepoRoot "meta.json") -Destination (Join-Path $releaseDir "meta.json")
-Copy-Item -LiteralPath $soPath -Destination (Join-Path $releaseDir "lib\arm64-v8a\libVkLayer_ExynosTools.so")
+Copy-Item -LiteralPath (Join-Path $RepoRoot "CHANGELOG_V3.0.txt") -Destination (Join-Path $releaseDir "CHANGELOG_V3.0.txt")
+if (Test-Path $readmePath) {
+    Copy-Item -LiteralPath $readmePath -Destination (Join-Path $releaseDir "README_ANDROID_LAYER.md")
+}
 
-# Zip without an extra top-level folder. The zip root contains files directly.
 $zipItems = Get-ChildItem -LiteralPath $releaseDir | ForEach-Object { $_.FullName }
 Compress-Archive -Path $zipItems -DestinationPath $zipPath -CompressionLevel Optimal
 

@@ -1,16 +1,13 @@
 {
-  "name": "ExynosTools",
-  "package": "ExynosTools_V3.0_STABLE",
-  "version": "3.0.0",
-  "channel": "stable",
-  "release_date": "2026-04-09",
-  "target_gpu": "Samsung Xclipse (Exynos)",
-  "abi": "arm64-v8a",
-  "library": "libVkLayer_ExynosTools.so",
-  "layer_name": "VK_LAYER_EXYNOSTOOLS_bcn",
-  "notes": [
-    "Stable Vulkan Layer bootstrap",
-    "Xclipse runtime capability detection",
-    "Command buffer lifecycle hardening"
-  ]
+  "schemaVersion": 1,
+  "name": "Vortek Xclipse Native",
+  "description": "Samsung Xclipse driver package with in-process BCn compatibility wrapper. Set VK_INSTANCE_LAYERS=VK_LAYER_VORTEK_XCLIPSE.",
+  "author": "Vortek / ExynosTools",
+  "packageVersion": "0.1-native-prototype",
+  "vendor": "SAMSUNG",
+  "driverVersion": "Vulkan 1.4.304",
+  "minApi": 35,
+  "libraryName": "vulkan.samsung.so",
+  "layerLibrary": "libVkLayer_VortekXclipse.so",
+  "layerName": "VK_LAYER_VORTEK_XCLIPSE"
 }

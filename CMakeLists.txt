@@ -104,6 +104,7 @@ add_library(VkLayer_VortekXclipse SHARED
     src/layer/layer_image_virtualization.cpp
     src/layer/layer_format_virtualization.cpp
     src/layer/layer_pipeline_selection.cpp
+    src/layer/layer_lsfg_compat.cpp
     src/layer/layer_settings_utils.cpp
     src/layer/layer_settings_runtime.cpp
     src/layer/layer_telemetry.cpp

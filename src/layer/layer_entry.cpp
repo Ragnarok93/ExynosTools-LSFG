@@ -3619,8 +3619,11 @@ VKAPI_ATTR VkResult VKAPI_CALL layer_CreateDevice(
             app_runtime = it_runtime->second;
         }
     }
+    const bool lsfg_process_active = exynos_lsfg_process_active();
+
     bool should_inject_descriptor_buffer =
         kEnableDescriptorBufferFastPath &&
+        !lsfg_process_active &&
         descriptor_buffer_support.extension_supported &&
         descriptor_buffer_support.descriptor_buffer_feature_supported &&
         descriptor_buffer_support.buffer_device_address_feature_supported &&

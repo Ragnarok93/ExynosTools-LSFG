@@ -1,0 +1,91 @@
+#elif defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_KHR)
+        auto* buffer_device_address_features =
+            find_struct_in_pnext_chain<VkPhysicalDeviceBufferDeviceAddressFeaturesKHR>(
+                const_cast<void*>(create_info_copy.pNext),
+                VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_KHR);
+        if (buffer_device_address_features) {
+            buffer_device_address_features->bufferDeviceAddress = VK_TRUE;
+        } else {
+            buffer_device_address_feature_ci.sType =
+                VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_KHR;
+            buffer_device_address_feature_ci.bufferDeviceAddress = VK_TRUE;
+            prepend_struct_to_pnext_chain(&create_info_copy.pNext, &buffer_device_address_feature_ci);
+        }
+        buffer_device_address_feature_requested = true;
+#endif
+
+        create_info_for_driver = create_info_copy.ptr();
+    }
+    if (extension_list_patched) {
+        create_info_copy.enabledExtensionCount = static_cast<uint32_t>(enabled_extensions.size());
+        create_info_copy.ppEnabledExtensionNames = enabled_extensions.data();
+        create_info_for_driver = create_info_copy.ptr();
+    }
+
+    VkResult result = instance_dispatch.create_device(
+        physicalDevice,
+        create_info_for_driver,
+        pAllocator,
+        pDevice);
+    if (result != VK_SUCCESS || !pDevice || *pDevice == VK_NULL_HANDLE) {
+        return result;
+    }
+
+    DeviceDispatch device_dispatch{};
+    device_dispatch.get_device_proc_addr = next_gdpa;
+    device_dispatch.destroy_device = reinterpret_cast<PFN_vkDestroyDevice>(
+        next_gdpa(*pDevice, "vkDestroyDevice"));
+    device_dispatch.bind_buffer_memory = reinterpret_cast<PFN_vkBindBufferMemory>(
+        next_gdpa(*pDevice, "vkBindBufferMemory"));
+    device_dispatch.bind_buffer_memory2 = reinterpret_cast<PFN_vkBindBufferMemory2>(
+        next_gdpa(*pDevice, "vkBindBufferMemory2"));
+#ifdef VK_KHR_bind_memory2
+    device_dispatch.bind_buffer_memory2_khr = reinterpret_cast<PFN_vkBindBufferMemory2KHR>(
+        next_gdpa(*pDevice, "vkBindBufferMemory2KHR"));
+#endif
+    device_dispatch.map_memory = reinterpret_cast<PFN_vkMapMemory>(
+        next_gdpa(*pDevice, "vkMapMemory"));
+    device_dispatch.unmap_memory = reinterpret_cast<PFN_vkUnmapMemory>(
+        next_gdpa(*pDevice, "vkUnmapMemory"));
+    // Phase 3A queue/presentation dispatch.
+    device_dispatch.get_device_queue =
+        reinterpret_cast<PFN_vkGetDeviceQueue>(
+            next_gdpa(*pDevice, "vkGetDeviceQueue"));
+    device_dispatch.get_device_queue2 =
+        reinterpret_cast<PFN_vkGetDeviceQueue2>(
+            next_gdpa(*pDevice, "vkGetDeviceQueue2"));
+    device_dispatch.queue_submit =
+        reinterpret_cast<PFN_vkQueueSubmit>(
+            next_gdpa(*pDevice, "vkQueueSubmit"));
+    device_dispatch.queue_submit2 =
+        reinterpret_cast<PFN_vkQueueSubmit2>(
+            next_gdpa(*pDevice, "vkQueueSubmit2"));
+#ifdef VK_KHR_swapchain
+    device_dispatch.queue_present_khr =
+        reinterpret_cast<PFN_vkQueuePresentKHR>(
+            next_gdpa(*pDevice, "vkQueuePresentKHR"));
+#endif
+    device_dispatch.create_image = reinterpret_cast<PFN_vkCreateImage>(
+        next_gdpa(*pDevice, "vkCreateImage"));
+    device_dispatch.destroy_image = reinterpret_cast<PFN_vkDestroyImage>(
+        next_gdpa(*pDevice, "vkDestroyImage"));
+    device_dispatch.create_image_view = reinterpret_cast<PFN_vkCreateImageView>(
+        next_gdpa(*pDevice, "vkCreateImageView"));
+    device_dispatch.destroy_image_view = reinterpret_cast<PFN_vkDestroyImageView>(
+        next_gdpa(*pDevice, "vkDestroyImageView"));
+    device_dispatch.create_render_pass = reinterpret_cast<PFN_vkCreateRenderPass>(
+        next_gdpa(*pDevice, "vkCreateRenderPass"));
+    device_dispatch.destroy_render_pass = reinterpret_cast<PFN_vkDestroyRenderPass>(
+        next_gdpa(*pDevice, "vkDestroyRenderPass"));
+    device_dispatch.create_framebuffer = reinterpret_cast<PFN_vkCreateFramebuffer>(
+        next_gdpa(*pDevice, "vkCreateFramebuffer"));
+    device_dispatch.destroy_framebuffer = reinterpret_cast<PFN_vkDestroyFramebuffer>(
+        next_gdpa(*pDevice, "vkDestroyFramebuffer"));
+    device_dispatch.create_sampler = reinterpret_cast<PFN_vkCreateSampler>(
+        next_gdpa(*pDevice, "vkCreateSampler"));
+    device_dispatch.destroy_sampler = reinterpret_cast<PFN_vkDestroySampler>(
+        next_gdpa(*pDevice, "vkDestroySampler"));
+    device_dispatch.create_command_pool = reinterpret_cast<PFN_vkCreateCommandPool>(
+        next_gdpa(*pDevice, "vkCreateCommandPool"));
+    device_dispatch.destroy_command_pool = reinterpret_cast<PFN_vkDestroyCommandPool>(
+        next_gdpa(*pDevice, "vkDestroyCommandPool"));

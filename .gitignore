@@ -1,0 +1,38 @@
+# Build/output artifacts
+build-lsfg/
+layer-test/
+tests/android_native_probe/.gradle/
+tests/android_native_probe/app/.cxx/
+tests/android_native_probe/app/build/
+tests/android_native_probe/build/
+tests/android_native_probe/.tool-fix-backup/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Local Android/Termux configuration
+tests/android_native_probe/local.properties
+
+# Backups
+*.bak
+*.before-*
+*.after-*
+
+# Compiled binaries
+android_vkprobe
+ndk_probe
+vulkan_probe
+vulkan_caps_probe
+vkprobe
+vk_image_caps
+vk_image_execute
+vk_interpolation_execute
+vk_motion_execute
+vk_sampled_to_storage
+vk_sampler_phase2
+vk_sampler_phase2e
+vk_sampler_phase2e_pass
+
+# Generated SPIR-V
+*.spv

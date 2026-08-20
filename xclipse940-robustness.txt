@@ -1,0 +1,7 @@
+=== XCLIPSE 940 ROBUSTNESS2 PROBE ===
+vkCreateInstance: 0
+
+GPU: Samsung Xclipse 940
+robustBufferAccess2 : YES
+robustImageAccess2  : YES
+nullDescriptor      : YES

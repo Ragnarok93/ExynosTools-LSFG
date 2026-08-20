@@ -1,0 +1,30 @@
+=== XCLIPSE 940 EXTERNAL MEMORY PROBE ===
+vkCreateInstance: 0
+
+========================================
+GPU 0
+========================================
+
+OPAQUE_FD
+  externalMemoryFeatures    : 0x00000006
+  compatibleHandleTypes     : 0x00000001
+  exportFromImportedHandles : 0x00000001
+  IMPORTABLE: YES
+  EXPORTABLE: YES
+  DEDICATED_ONLY: NO
+
+DMA_BUF
+  externalMemoryFeatures    : 0x00000006
+  compatibleHandleTypes     : 0x00000200
+  exportFromImportedHandles : 0x00000200
+  IMPORTABLE: YES
+  EXPORTABLE: YES
+  DEDICATED_ONLY: NO
+
+ANDROID_HARDWARE_BUFFER
+  externalMemoryFeatures    : 0x00000006
+  compatibleHandleTypes     : 0x00000400
+  exportFromImportedHandles : 0x00000400
+  IMPORTABLE: YES
+  EXPORTABLE: YES
+  DEDICATED_ONLY: NO

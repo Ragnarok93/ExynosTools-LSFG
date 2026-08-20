@@ -3,6 +3,8 @@ plugins {
 }
 
 android {
+    ndkVersion = "27.2.12479018"
+
     namespace = "com.exynostools.androidprobe"
     compileSdk = 35
 
@@ -23,7 +25,6 @@ android {
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
         }
     }
 

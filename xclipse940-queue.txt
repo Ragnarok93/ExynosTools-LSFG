@@ -1,0 +1,24 @@
+=== XCLIPSE 940 QUEUE / TIMESTAMP PROBE ===
+vkCreateInstance: 0
+
+GPU: Samsung Xclipse 940
+timestampPeriod: 39.062 ns
+timestampComputeAndGraphics: YES
+maxComputeWorkGroupCount: 65535 65535 65535
+Queue families: 2
+
+Queue family 0
+  count: 4
+  flags: 0x0000001f
+  GRAPHICS: YES
+  COMPUTE : YES
+  TRANSFER: YES
+  SPARSE  : YES
+
+Queue family 1
+  count: 2
+  flags: 0x0000001e
+  GRAPHICS: NO
+  COMPUTE : YES
+  TRANSFER: YES
+  SPARSE  : YES

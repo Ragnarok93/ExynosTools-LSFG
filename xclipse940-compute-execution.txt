@@ -1,0 +1,101 @@
+=== XCLIPSE 940 REAL COMPUTE EXECUTION PROBE ===
+vkCreateInstance: 0
+Physical device count: 1
+GPU: Samsung Xclipse 940
+Vulkan API: 1.3.279
+Queue family count: 2
+Queue family 0: flags=0x0000001f queues=4
+Queue family 1: flags=0x0000001e queues=2
+Selected compute queue family: 1
+vkCreateDevice: 0
+Compute queue acquired: YES
+vkCreateBuffer: 0
+Buffer allocation size: 256
+Buffer memory type: 0
+vkAllocateMemory: 0
+vkBindBufferMemory: 0
+vkMapMemory: 0
+SPIR-V size: 772 bytes
+vkCreateShaderModule: 0
+vkCreateDescriptorSetLayout: 0
+vkCreatePipelineLayout: 0
+vkCreateComputePipelines: 0
+vkCreateDescriptorPool: 0
+vkAllocateDescriptorSets: 0
+vkCreateCommandPool: 0
+vkAllocateCommandBuffers: 0
+vkBeginCommandBuffer: 0
+vkEndCommandBuffer: 0
+vkCreateFence: 0
+vkQueueSubmit: 0
+vkWaitForFences: 0
+vkMapMemory(readback): 0
+value[00] = 0x4c534647 expected=0x4c534647 OK
+value[01] = 0x4c534648 expected=0x4c534648 OK
+value[02] = 0x4c534649 expected=0x4c534649 OK
+value[03] = 0x4c53464a expected=0x4c53464a OK
+value[04] = 0x4c53464b expected=0x4c53464b OK
+value[05] = 0x4c53464c expected=0x4c53464c OK
+value[06] = 0x4c53464d expected=0x4c53464d OK
+value[07] = 0x4c53464e expected=0x4c53464e OK
+value[08] = 0x4c53464f expected=0x4c53464f OK
+value[09] = 0x4c534650 expected=0x4c534650 OK
+value[10] = 0x4c534651 expected=0x4c534651 OK
+value[11] = 0x4c534652 expected=0x4c534652 OK
+value[12] = 0x4c534653 expected=0x4c534653 OK
+value[13] = 0x4c534654 expected=0x4c534654 OK
+value[14] = 0x4c534655 expected=0x4c534655 OK
+value[15] = 0x4c534656 expected=0x4c534656 OK
+value[16] = 0x4c534657 expected=0x4c534657 OK
+value[17] = 0x4c534658 expected=0x4c534658 OK
+value[18] = 0x4c534659 expected=0x4c534659 OK
+value[19] = 0x4c53465a expected=0x4c53465a OK
+value[20] = 0x4c53465b expected=0x4c53465b OK
+value[21] = 0x4c53465c expected=0x4c53465c OK
+value[22] = 0x4c53465d expected=0x4c53465d OK
+value[23] = 0x4c53465e expected=0x4c53465e OK
+value[24] = 0x4c53465f expected=0x4c53465f OK
+value[25] = 0x4c534660 expected=0x4c534660 OK
+value[26] = 0x4c534661 expected=0x4c534661 OK
+value[27] = 0x4c534662 expected=0x4c534662 OK
+value[28] = 0x4c534663 expected=0x4c534663 OK
+value[29] = 0x4c534664 expected=0x4c534664 OK
+value[30] = 0x4c534665 expected=0x4c534665 OK
+value[31] = 0x4c534666 expected=0x4c534666 OK
+value[32] = 0x4c534667 expected=0x4c534667 OK
+value[33] = 0x4c534668 expected=0x4c534668 OK
+value[34] = 0x4c534669 expected=0x4c534669 OK
+value[35] = 0x4c53466a expected=0x4c53466a OK
+value[36] = 0x4c53466b expected=0x4c53466b OK
+value[37] = 0x4c53466c expected=0x4c53466c OK
+value[38] = 0x4c53466d expected=0x4c53466d OK
+value[39] = 0x4c53466e expected=0x4c53466e OK
+value[40] = 0x4c53466f expected=0x4c53466f OK
+value[41] = 0x4c534670 expected=0x4c534670 OK
+value[42] = 0x4c534671 expected=0x4c534671 OK
+value[43] = 0x4c534672 expected=0x4c534672 OK
+value[44] = 0x4c534673 expected=0x4c534673 OK
+value[45] = 0x4c534674 expected=0x4c534674 OK
+value[46] = 0x4c534675 expected=0x4c534675 OK
+value[47] = 0x4c534676 expected=0x4c534676 OK
+value[48] = 0x4c534677 expected=0x4c534677 OK
+value[49] = 0x4c534678 expected=0x4c534678 OK
+value[50] = 0x4c534679 expected=0x4c534679 OK
+value[51] = 0x4c53467a expected=0x4c53467a OK
+value[52] = 0x4c53467b expected=0x4c53467b OK
+value[53] = 0x4c53467c expected=0x4c53467c OK
+value[54] = 0x4c53467d expected=0x4c53467d OK
+value[55] = 0x4c53467e expected=0x4c53467e OK
+value[56] = 0x4c53467f expected=0x4c53467f OK
+value[57] = 0x4c534680 expected=0x4c534680 OK
+value[58] = 0x4c534681 expected=0x4c534681 OK
+value[59] = 0x4c534682 expected=0x4c534682 OK
+value[60] = 0x4c534683 expected=0x4c534683 OK
+value[61] = 0x4c534684 expected=0x4c534684 OK
+value[62] = 0x4c534685 expected=0x4c534685 OK
+value[63] = 0x4c534686 expected=0x4c534686 OK
+
+=== COMPUTE EXECUTION RESULT ===
+RESULT: PASS
+64/64 shader writes verified.
+REAL VULKAN COMPUTE EXECUTION: YES

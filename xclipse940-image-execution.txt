@@ -1,0 +1,38 @@
+=== XCLIPSE 940 STORAGE IMAGE EXECUTION PROBE ===
+vkCreateInstance: 0
+GPU: Samsung Xclipse 940
+Vulkan: 1.3.279
+Selected compute queue family: 1
+vkCreateDevice: 0
+vkCreateImage: 0
+vkAllocateMemory(image): 0
+vkBindImageMemory: 0
+vkCreateBuffer(readback): 0
+vkAllocateMemory(buffer): 0
+vkBindBufferMemory: 0
+vkCreateShaderModule: 0
+vkCreateDescriptorSetLayout: 0
+vkCreatePipelineLayout: 0
+vkCreateComputePipelines: 0
+vkCreateDescriptorPool: 0
+vkAllocateDescriptorSets: 0
+vkCreateImageView: 0
+vkCreateCommandPool: 0
+vkAllocateCommandBuffers: 0
+vkBeginCommandBuffer: 0
+vkEndCommandBuffer: 0
+vkCreateFence: 0
+vkQueueSubmit: 0
+vkWaitForFences: 0
+vkMapMemory(readback): 0
+pixel[00,00] = 00 00 40 ff expected=00 00 40 ff OK
+pixel[63,00] = ff 00 40 ff expected=ff 00 40 ff OK
+pixel[00,63] = 00 ff 40 ff expected=00 ff 40 ff OK
+pixel[63,63] = ff ff 40 ff expected=ff ff 40 ff OK
+pixel[32,32] = 82 82 40 ff expected=82 82 40 ff OK
+pixel[16,48] = 41 c2 40 ff expected=41 c2 40 ff OK
+
+=== IMAGE EXECUTION RESULT ===
+RESULT: PASS
+STORAGE IMAGE COMPUTE EXECUTION: YES
+GPU imageStore -> transfer -> CPU readback: YES

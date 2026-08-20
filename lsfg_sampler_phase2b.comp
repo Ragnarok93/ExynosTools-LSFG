@@ -1,0 +1,22 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D frameA;
+layout(set = 0, binding = 1) uniform sampler2D frameB;
+layout(set = 0, binding = 2, rgba8) uniform writeonly image2D outputImage;
+
+void main()
+{
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+
+    if (p.x >= 64 || p.y >= 64)
+        return;
+
+    vec4 a = textureLod(frameA, vec2(0.5), 0.0);
+    vec4 b = textureLod(frameB, vec2(0.5), 0.0);
+
+    vec4 result = mix(a, b, 0.5);
+
+    imageStore(outputImage, p, result);
+}

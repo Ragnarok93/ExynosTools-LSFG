@@ -1,0 +1,28 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D inputTexture;
+
+layout(set = 0, binding = 1, rgba8) uniform writeonly image2D outputImage;
+
+void main()
+{
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+
+    if (p.x >= 64 || p.y >= 64)
+        return;
+
+    /*
+     * Sample at the exact texel center.
+     *
+     * This deliberately exercises the sampled-image path rather
+     * than using imageLoad(), so the shader must perform a normal
+     * texture lookup through the sampler.
+     */
+    vec2 uv = (vec2(p) + vec2(0.5)) / vec2(64.0);
+
+    vec4 color = texture(inputTexture, uv);
+
+    imageStore(outputImage, p, color);
+}

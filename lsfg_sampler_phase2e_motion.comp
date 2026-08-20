@@ -1,0 +1,74 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D frameA;
+layout(set = 0, binding = 1) uniform sampler2D frameB;
+
+/*
+ * Motion vectors are stored as normalized UV displacement:
+ *
+ *   RG = (dx, dy)
+ *
+ * A positive X value means the corresponding feature moves
+ * toward increasing U between frame A and frame B.
+ */
+layout(set = 0, binding = 2, rg32f) uniform readonly image2D motionVectors;
+
+layout(set = 0, binding = 3, rgba8) uniform writeonly image2D outputImage;
+
+void main()
+{
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+
+    if (p.x >= 64 || p.y >= 64)
+        return;
+
+    /*
+     * Texel-center UV.
+     */
+    vec2 uv =
+        (vec2(p) + vec2(0.5)) /
+        vec2(64.0);
+
+    /*
+     * Read the motion vector belonging to this output pixel.
+     */
+    vec2 motion =
+        imageLoad(motionVectors, p).rg;
+
+    /*
+     * Reproject the two temporal samples around the
+     * output position.
+     */
+    vec2 uvA = clamp(
+        uv - motion * 0.5,
+        vec2(0.0),
+        vec2(1.0));
+
+    vec2 uvB = clamp(
+        uv + motion * 0.5,
+        vec2(0.0),
+        vec2(1.0));
+
+    vec4 a = textureLod(
+        frameA,
+        uvA,
+        0.0);
+
+    vec4 b = textureLod(
+        frameB,
+        uvB,
+        0.0);
+
+    /*
+     * Temporal midpoint.
+     */
+    vec4 result =
+        mix(a, b, 0.5);
+
+    imageStore(
+        outputImage,
+        p,
+        result);
+}

@@ -132,13 +132,6 @@ set_target_properties(VkLayer_VortekXclipse PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
 )
-if((CMAKE_SYSTEM_NAME STREQUAL "Android" OR (UNIX AND NOT APPLE)) AND
-   CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    target_link_options(VkLayer_VortekXclipse PRIVATE
-        "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports.map"
-    )
-endif()
-
 target_include_directories(VkLayer_VortekXclipse PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/bcdec"

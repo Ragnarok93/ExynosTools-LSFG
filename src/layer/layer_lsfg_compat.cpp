@@ -11,10 +11,9 @@ bool non_empty_environment_value(const char* name) {
 }
 
 bool lsfg_process_environment_present() {
-    // GameNative sets LSFG_PROCESS for the target application and LSFG_CONFIG
-    // for the configuration consumed by lsfg-vk.  Requiring both avoids
-    // accidentally entering LSFG mode in an unrelated process that happens
-    // to inherit one variable.
+    // GameNative's LSFG integration marks the target process with both
+    // variables. Requiring the pair avoids false positives from unrelated
+    // inherited configuration.
     return non_empty_environment_value("LSFG_PROCESS") &&
            non_empty_environment_value("LSFG_CONFIG");
 }

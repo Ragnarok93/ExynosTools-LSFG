@@ -1,0 +1,2 @@
+# The probe APK consumes the locally built layer; do not commit the binary.
+*/libVkLayer_VortekXclipse.so

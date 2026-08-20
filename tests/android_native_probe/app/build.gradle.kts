@@ -27,6 +27,5 @@ android {
         }
     }
 
-    sourceSets["main"].jniLibs.srcDir("../../../../build-lsfg")
+    sourceSets["main"].jniLibs.srcDir("src/main/jniLibs")
 }
-

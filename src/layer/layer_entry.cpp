@@ -43,6 +43,7 @@
 #include "layer_format_virtualization.h"
 #include "layer_image_virtualization.h"
 #include "layer_pipeline_selection.h"
+#include "layer_lsfg_compat.h"
 #include "layer_settings_types.h"
 #include "layer_settings_runtime.h"
 #include "layer_settings_utils.h"
@@ -3607,8 +3608,13 @@ VKAPI_ATTR VkResult VKAPI_CALL layer_CreateDevice(
     bool buffer_device_address_feature_requested =
         device_create_requests_buffer_device_address_feature(pCreateInfo);
 
-    DescriptorBufferCreateSupport descriptor_buffer_support =
-        query_descriptor_buffer_create_support(physicalDevice, instance, instance_dispatch);
+    const bool lsfg_process_active = exynos_lsfg_process_active();
+
+    DescriptorBufferCreateSupport descriptor_buffer_support{};
+    if (!lsfg_process_active) {
+        descriptor_buffer_support =
+            query_descriptor_buffer_create_support(physicalDevice, instance, instance_dispatch);
+    }
     PhysicalRuntime physical_runtime{};
     (void)get_physical_runtime_snapshot(physicalDevice, &physical_runtime);
     InstanceRuntime app_runtime{};
@@ -3619,8 +3625,6 @@ VKAPI_ATTR VkResult VKAPI_CALL layer_CreateDevice(
             app_runtime = it_runtime->second;
         }
     }
-    const bool lsfg_process_active = exynos_lsfg_process_active();
-
     bool should_inject_descriptor_buffer =
         kEnableDescriptorBufferFastPath &&
         !lsfg_process_active &&

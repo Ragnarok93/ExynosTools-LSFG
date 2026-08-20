@@ -9,6 +9,22 @@ import sys
 
 path = Path(sys.argv[1])
 text = path.read_text()
+
+include = '#include "layer_lsfg_compat.h"'
+if include not in text:
+    marker = '#include "layer_entry.h"'
+    if marker in text:
+        text = text.replace(marker, marker + '\\n' + include, 1)
+    else:
+        raise SystemExit("could not find a safe include insertion point in layer_entry.cpp")
+
+include = '#include "layer_lsfg_compat.h"'
+if include not in text:
+    marker = '#include "layer_entry.h"'
+    if marker in text:
+        text = text.replace(marker, marker + '\n' + include, 1)
+    else:
+        raise SystemExit("could not find a safe include insertion point in layer_entry.cpp")
 old = '''    DescriptorBufferCreateSupport descriptor_buffer_support =
         query_descriptor_buffer_create_support(physicalDevice, instance, instance_dispatch);
     PhysicalRuntime physical_runtime{};

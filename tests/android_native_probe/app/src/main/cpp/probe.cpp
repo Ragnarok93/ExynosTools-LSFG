@@ -3,13 +3,13 @@
 #include <vulkan/vulkan.h>
 
 #include <cerrno>
-#include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #define LOG_TAG "ExynosTools-Phase3C"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -22,7 +22,7 @@ struct ProbeResult {
     VkResult create_instance_result = VK_ERROR_INITIALIZATION_FAILED;
     uint32_t layer_count = 0;
     uint32_t device_count = 0;
-    std::string layer_status;
+    bool vortek_found = false;
     std::string device_summary;
 };
 
@@ -45,6 +45,18 @@ std::string result_name(VkResult result) {
     }
 }
 
+bool ensure_directory(const std::string& path) {
+    if (mkdir(path.c_str(), 0700) == 0) {
+        return true;
+    }
+    if (errno == EEXIST) {
+        struct stat st{};
+        return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+    }
+    LOGE("mkdir(%s) failed: errno=%d (%s)", path.c_str(), errno, std::strerror(errno));
+    return false;
+}
+
 bool write_layer_manifest(const std::string& directory, const std::string& native_library_dir) {
     const std::string manifest_path = directory + "/VkLayer_vortek_xclipse.json";
     std::ofstream manifest(manifest_path, std::ios::trunc);
@@ -54,19 +66,18 @@ bool write_layer_manifest(const std::string& directory, const std::string& nativ
         return false;
     }
 
-    manifest
-        << "{\n"
-        << "  \"file_format_version\": \"1.2.0\",\n"
-        << "  \"layer\": {\n"
-        << "    \"name\": \"VK_LAYER_VORTEK_XCLIPSE\",\n"
-        << "    \"type\": \"GLOBAL\",\n"
-        << "    \"library_path\": \"" << native_library_dir
-        << "/libVkLayer_VortekXclipse.so\",\n"
-        << "    \"api_version\": \"1.3.0\",\n"
-        << "    \"implementation_version\": 1,\n"
-        << "    \"description\": \"Vortek Xclipse in-process BCn compatibility wrapper\"\n"
-        << "  }\n"
-        << "}\n";
+    manifest << "{\n"
+             << "  \"file_format_version\": \"1.2.0\",\n"
+             << "  \"layer\": {\n"
+             << "    \"name\": \"VK_LAYER_VORTEK_XCLIPSE\",\n"
+             << "    \"type\": \"GLOBAL\",\n"
+             << "    \"library_path\": \"" << native_library_dir
+             << "/libVkLayer_VortekXclipse.so\",\n"
+             << "    \"api_version\": \"1.3.0\",\n"
+             << "    \"implementation_version\": 1,\n"
+             << "    \"description\": \"Vortek Xclipse in-process BCn compatibility wrapper\"\n"
+             << "  }\n"
+             << "}\n";
 
     if (!manifest) {
         LOGE("Failed while writing layer manifest %s", manifest_path.c_str());
@@ -78,43 +89,38 @@ bool write_layer_manifest(const std::string& directory, const std::string& nativ
     return true;
 }
 
-bool enumerate_layers(ProbeResult& result) {
+void enumerate_layers(ProbeResult& result) {
     uint32_t count = 0;
     VkResult vk_result = vkEnumerateInstanceLayerProperties(&count, nullptr);
     if (vk_result != VK_SUCCESS) {
         LOGE("vkEnumerateInstanceLayerProperties(count) failed: %s", result_name(vk_result).c_str());
-        return false;
+        return;
     }
 
     std::vector<VkLayerProperties> properties(count);
     vk_result = vkEnumerateInstanceLayerProperties(&count, properties.data());
     if (vk_result != VK_SUCCESS && vk_result != VK_INCOMPLETE) {
         LOGE("vkEnumerateInstanceLayerProperties(data) failed: %s", result_name(vk_result).c_str());
-        return false;
+        return;
     }
 
     result.layer_count = count;
-    bool found_vortek = false;
-    std::ostringstream summary;
-    summary << "instance layers=" << count;
     for (const auto& property : properties) {
-        summary << " | " << property.layerName
-                << " api=" << VK_VERSION_MAJOR(property.specVersion)
-                << "." << VK_VERSION_MINOR(property.specVersion)
-                << "." << VK_VERSION_PATCH(property.specVersion);
+        LOGI("Instance layer: %s api=%u.%u.%u",
+             property.layerName,
+             VK_VERSION_MAJOR(property.specVersion),
+             VK_VERSION_MINOR(property.specVersion),
+             VK_VERSION_PATCH(property.specVersion));
         if (std::strcmp(property.layerName, "VK_LAYER_VORTEK_XCLIPSE") == 0) {
-            found_vortek = true;
+            result.vortek_found = true;
         }
     }
 
-    result.layer_status = found_vortek ? "Vortek layer FOUND" : "Vortek layer NOT FOUND";
-    LOGI("%s; %s", result.layer_status.c_str(), summary.str().c_str());
-    return true;
+    LOGI("Vortek enumeration: %s", result.vortek_found ? "FOUND" : "NOT FOUND");
 }
 
 ProbeResult run_instance_probe(bool enable_vortek) {
     ProbeResult result{};
-
     enumerate_layers(result);
 
     const char* enabled_layers[] = {"VK_LAYER_VORTEK_XCLIPSE"};
@@ -135,6 +141,7 @@ ProbeResult run_instance_probe(bool enable_vortek) {
         create_info.ppEnabledLayerNames = enabled_layers;
     }
 
+    VkInstance instance = VK_NULL_HANDLE;
     result.create_instance_result = vkCreateInstance(&create_info, nullptr, &instance);
     if (result.create_instance_result != VK_SUCCESS) {
         LOGE("%s vkCreateInstance failed: %s",
@@ -168,16 +175,16 @@ ProbeResult run_instance_probe(bool enable_vortek) {
     for (uint32_t index = 0; index < device_count; ++index) {
         VkPhysicalDeviceProperties properties{};
         vkGetPhysicalDeviceProperties(devices[index], &properties);
+
         summary << " | GPU" << index
-                << " name=\"" << properties.deviceName << \""
+                << " name=\"" << properties.deviceName << "\""
                 << " vendor=0x" << std::hex << properties.vendorID
                 << " device=0x" << properties.deviceID << std::dec
                 << " api=" << VK_VERSION_MAJOR(properties.apiVersion)
                 << "." << VK_VERSION_MINOR(properties.apiVersion)
                 << "." << VK_VERSION_PATCH(properties.apiVersion)
-                << " driver=" << VK_VERSION_MAJOR(properties.driverVersion)
-                << "." << VK_VERSION_MINOR(properties.driverVersion)
-                << "." << VK_VERSION_PATCH(properties.driverVersion);
+                << " driverVersion=0x" << std::hex << properties.driverVersion << std::dec;
+
         LOGI("%s GPU%u: name=%s vendor=0x%04x device=0x%04x api=%u.%u.%u driverVersion=0x%08x",
              enable_vortek ? "VORTEK" : "BASELINE",
              index,
@@ -219,12 +226,9 @@ Java_com_exynostools_androidprobe_MainActivity_runProbe(
     }
 
     const std::string layer_dir = files_dir + "/vulkan-layer";
-    std::string mkdir_command = "mkdir -p \"" + layer_dir + "\"";
-    if (std::system(mkdir_command.c_str()) != 0) {
-        LOGE("Failed to create %s", layer_dir.c_str());
+    if (!ensure_directory(layer_dir)) {
         return env->NewStringUTF("Phase 3C ERROR: cannot create layer directory");
     }
-
     if (!write_layer_manifest(layer_dir, native_library_dir)) {
         return env->NewStringUTF("Phase 3C ERROR: cannot write layer manifest");
     }
@@ -239,7 +243,7 @@ Java_com_exynostools_androidprobe_MainActivity_runProbe(
     LOGI("Running baseline without Vortek...");
     ProbeResult baseline = run_instance_probe(false);
 
-    LOGI("Running Samsung ICD test with Vortek enabled...");
+    LOGI("Running Android-native vendor ICD test with Vortek enabled...");
     ProbeResult vortek = run_instance_probe(true);
 
     std::ostringstream output;
@@ -248,12 +252,13 @@ Java_com_exynostools_androidprobe_MainActivity_runProbe(
            << "Baseline vkCreateInstance: " << result_name(baseline.create_instance_result) << "\n"
            << "Baseline devices: " << baseline.device_count << "\n"
            << baseline.device_summary << "\n\n"
-           << "Vortek layer enumeration: " << vortek.layer_status << "\n"
+           << "Vortek layer enumeration: " << (vortek.vortek_found ? "FOUND" : "NOT FOUND") << "\n"
            << "Vortek vkCreateInstance: " << result_name(vortek.create_instance_result) << "\n"
            << "Vortek devices: " << vortek.device_count << "\n"
            << vortek.device_summary << "\n";
 
     if (baseline.create_instance_result == VK_SUCCESS &&
+        vortek.vortek_found &&
         vortek.create_instance_result == VK_SUCCESS &&
         vortek.device_count > 0) {
         LOGI("PHASE 3C RESULT: SUCCESS - Android process reached a Vulkan device with Vortek enabled");

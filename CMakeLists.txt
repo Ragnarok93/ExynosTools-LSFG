@@ -1,4 +1,8 @@
 cmake_minimum_required(VERSION 3.22)
+# ETLSFG_RPATH_DISABLED
+# Android Vulkan layers must not contain host/NDK build-machine RPATHs.
+set(CMAKE_SKIP_RPATH ON)
+
 project(VortekXclipseLayer LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -72,23 +76,34 @@ if(NOT EXYNOS_VULKAN_INCLUDE_DIR)
     )
 endif()
 
-set(EXYNOS_VULKAN_UTILITY_INCLUDE_DIR "")
-set(EXYNOS_VULKAN_UTILITY_SRC_DIR "")
-if(EXYNOS_LAYER_USE_SUBMODULE_DEPS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/Vulkan-Utility-Libraries/include")
-    set(EXYNOS_VULKAN_UTILITY_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/Vulkan-Utility-Libraries/include")
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/Vulkan-Utility-Libraries/src/vulkan")
-        set(EXYNOS_VULKAN_UTILITY_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/Vulkan-Utility-Libraries/src/vulkan")
+if(NOT EXYNOS_VULKAN_UTILITY_INCLUDE_DIR)
+    if(EXYNOS_LAYER_USE_SUBMODULE_DEPS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/Vulkan-Utility-Libraries/include")
+        set(EXYNOS_VULKAN_UTILITY_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/Vulkan-Utility-Libraries/include")
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/Vulkan-Utility-Libraries/src/vulkan")
+            set(EXYNOS_VULKAN_UTILITY_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/Vulkan-Utility-Libraries/src/vulkan")
+        endif()
+    elseif(EXYNOS_LAYER_USE_LOCAL_VULKAN_REPOS AND EXISTS "${EXYNOS_VULKAN_REPOS_ROOT}/Vulkan-Utility-Libraries/include")
+        set(EXYNOS_VULKAN_UTILITY_INCLUDE_DIR "${EXYNOS_VULKAN_REPOS_ROOT}/Vulkan-Utility-Libraries/include")
+        if(EXISTS "${EXYNOS_VULKAN_REPOS_ROOT}/Vulkan-Utility-Libraries/src/vulkan")
+            set(EXYNOS_VULKAN_UTILITY_SRC_DIR "${EXYNOS_VULKAN_REPOS_ROOT}/Vulkan-Utility-Libraries/src/vulkan")
+        endif()
     endif()
-elseif(EXYNOS_LAYER_USE_LOCAL_VULKAN_REPOS AND EXISTS "${EXYNOS_VULKAN_REPOS_ROOT}/Vulkan-Utility-Libraries/include")
-    set(EXYNOS_VULKAN_UTILITY_INCLUDE_DIR "${EXYNOS_VULKAN_REPOS_ROOT}/Vulkan-Utility-Libraries/include")
-    if(EXISTS "${EXYNOS_VULKAN_REPOS_ROOT}/Vulkan-Utility-Libraries/src/vulkan")
-        set(EXYNOS_VULKAN_UTILITY_SRC_DIR "${EXYNOS_VULKAN_REPOS_ROOT}/Vulkan-Utility-Libraries/src/vulkan")
+endif()
+
+if(EXYNOS_VULKAN_UTILITY_INCLUDE_DIR AND NOT EXYNOS_VULKAN_UTILITY_SRC_DIR)
+    if(EXISTS "${EXYNOS_VULKAN_UTILITY_INCLUDE_DIR}/../src/vulkan")
+        get_filename_component(
+            EXYNOS_VULKAN_UTILITY_SRC_DIR
+            "${EXYNOS_VULKAN_UTILITY_INCLUDE_DIR}/../src/vulkan"
+            ABSOLUTE
+        )
     endif()
 endif()
 
 if(ANDROID)
-    find_library(ANDROID_LOG_LIB log REQUIRED)
-    find_library(ANDROID_VULKAN_LIB vulkan REQUIRED)
+    # Link Android system libraries by soname rather than absolute NDK paths.
+    # This prevents the host NDK sysroot from becoming an ELF RUNPATH.
+    set(ANDROID_SYSTEM_LIBS vulkan log)
 endif()
 
 add_library(VkLayer_VortekXclipse SHARED
@@ -132,6 +147,10 @@ endif()
 set_target_properties(VkLayer_VortekXclipse PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
+    SKIP_BUILD_RPATH ON
+    BUILD_WITH_INSTALL_RPATH OFF
+    INSTALL_RPATH ""
+    SKIP_INSTALL_RPATH ON
 )
 target_include_directories(VkLayer_VortekXclipse PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -149,8 +168,20 @@ endif()
 
 if(ANDROID)
     target_link_libraries(VkLayer_VortekXclipse PRIVATE
-        ${ANDROID_VULKAN_LIB}
-        ${ANDROID_LOG_LIB}
+        ${ANDROID_SYSTEM_LIBS}
+    )
+
+    # Termux's Clang Android driver injects the NDK sysroot as DT_RUNPATH.
+    # That path is valid only on the build machine and must never ship in
+    # the Android Vulkan layer. Remove it after linking.
+    find_program(EXYNOS_PATCHELF_EXECUTABLE patchelf REQUIRED)
+
+    add_custom_command(TARGET VkLayer_VortekXclipse POST_BUILD
+        COMMAND "${EXYNOS_PATCHELF_EXECUTABLE}"
+                --remove-rpath
+                "$<TARGET_FILE:VkLayer_VortekXclipse>"
+        COMMENT "Removing build-machine RPATH/RUNPATH from Android Vulkan layer"
+        VERBATIM
     )
 else()
     find_package(Vulkan REQUIRED)

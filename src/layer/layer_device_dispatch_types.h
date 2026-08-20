@@ -12,6 +12,24 @@ struct DeviceDispatch {
 #endif
     PFN_vkMapMemory map_memory = nullptr;
     PFN_vkUnmapMemory unmap_memory = nullptr;
+    PFN_vkAllocateMemory allocate_memory = nullptr;
+    PFN_vkFreeMemory free_memory = nullptr;
+#ifdef VK_KHR_external_memory_fd
+    PFN_vkGetMemoryFdKHR get_memory_fd_khr = nullptr;
+    PFN_vkGetMemoryFdPropertiesKHR get_memory_fd_properties_khr = nullptr;
+#endif
+#ifdef VK_KHR_external_semaphore_fd
+    PFN_vkCreateSemaphore create_semaphore = nullptr;
+    PFN_vkDestroySemaphore destroy_semaphore = nullptr;
+    PFN_vkGetSemaphoreFdKHR get_semaphore_fd_khr = nullptr;
+    PFN_vkImportSemaphoreFdKHR import_semaphore_fd_khr = nullptr;
+#endif
+#ifdef VK_KHR_external_fence_fd
+    PFN_vkCreateFence create_fence = nullptr;
+    PFN_vkDestroyFence destroy_fence = nullptr;
+    PFN_vkGetFenceFdKHR get_fence_fd_khr = nullptr;
+    PFN_vkImportFenceFdKHR import_fence_fd_khr = nullptr;
+#endif
     PFN_vkCreateImage create_image = nullptr;
     PFN_vkDestroyImage destroy_image = nullptr;
     PFN_vkCreateImageView create_image_view = nullptr;

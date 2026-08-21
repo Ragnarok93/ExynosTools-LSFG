@@ -85,3 +85,9 @@ apply_phase*.py
 rewrite_motion_oracle.py
 fix_*.sh
 run-motion-sweep.sh
+
+# fix: cover actual phase3c backup dir names + helper script + pipe-named stray
+phase3c-backup-*/
+phase3c-restore-backup-*/
+cleanup-untrack.sh
+*|*

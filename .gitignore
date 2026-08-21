@@ -36,3 +36,52 @@ vk_sampler_phase2e_pass
 
 # Generated SPIR-V
 *.spv
+
+# --- ExynosTools-LSFG cleanup (scratch / build artifacts) ---
+# Build directories (Termux/Android and host)
+build-lsfg-termux/
+build-rpath-test/
+build-*/
+
+# Backups
+*.bak-*
+
+# Phase 3C probe backups
+phase3c-*-backup/
+phase3c-restore-backup-*/
+
+# Prebuilt driver bundles and binaries
+gamenative-eden-vortek-xclipse/
+package-vortek-xclipse/
+zip-verify/
+*.so
+*.zip
+
+# Build / probe logs
+*.log
+
+# Xclipse 940 probe capture dumps
+xclipse940-*.txt
+phase3b-*.txt
+phase3c-*.txt
+
+# Root-level probe / reverse-engineering scratch sources
+android_vkprobe*.c
+vkprobe.c
+vk_sampler_phase2*.c
+vk_image_caps.c
+vk_image_execute.c
+vk_interpolation_execute.c
+vk_motion_*.c
+vk_motion_oracle_execute.c
+vk_sampled_to_storage.c
+
+# Scratch compute shaders
+lsfg_*.comp
+lsfg_sampler_*.comp
+
+# Scratch helper scripts
+apply_phase*.py
+rewrite_motion_oracle.py
+fix_*.sh
+run-motion-sweep.sh

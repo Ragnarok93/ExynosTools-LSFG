@@ -2983,39 +2983,6 @@ bool has_incompatible_external_image_request(const void* pNext) {
                 return true;
             }
         }
-#if defined(__ANDROID__)
-        if (current->sType == VK_STRUCTURE_TYPE_EXTERNAL_FORMAT_ANDROID) {
-            const auto* external_format =
-                reinterpret_cast<const VkExternalFormatANDROID*>(current);
-            if (external_format->externalFormat != 0) {
-                return true;
-            }
-        }
-#endif
-    }
-    return false;
-}
-
-bool has_external_memory_image_create_request(const VkImageCreateInfo& info) {
-    for (auto* current = reinterpret_cast<const VkBaseInStructure*>(info.pNext);
-         current;
-         current = current->pNext) {
-        if (current->sType == VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO) {
-            const auto* external_info =
-                reinterpret_cast<const VkExternalMemoryImageCreateInfo*>(current);
-            if (external_info->handleTypes != 0) {
-                return true;
-            }
-        }
-#ifdef VK_NV_external_memory
-        if (current->sType == VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO_NV) {
-            const auto* external_info =
-                reinterpret_cast<const VkExternalMemoryImageCreateInfoNV*>(current);
-            if (external_info->handleTypes != 0) {
-                return true;
-            }
-        }
-#endif
     }
     return false;
 }
@@ -3340,18 +3307,6 @@ bool prepare_virtual_bcn_image_format_query(
     *query_info = original_info;
 
     if (has_incompatible_image_view_format_request(original_info)) {
-        return false;
-    }
-
-    // GameNative's LSFG-VK owns the real swapchain/present path and relies
-    // on Android external-memory/AHardwareBuffer handling. Do not let the
-    // BCn virtualization layer rewrite an LSFG-sensitive external-memory
-    // query: the decoded backing-image abstraction cannot safely represent
-    // LSFG's external-memory contract.
-    const LayerLsfgCompatSnapshot lsfg_compat = snapshot_lsfg_compat();
-    if (lsfg_compat.enabled &&
-        is_bcn_format(original_info.format) &&
-        has_incompatible_external_image_request(original_info.pNext)) {
         return false;
     }
 
@@ -4453,18 +4408,7 @@ VKAPI_ATTR VkResult VKAPI_CALL layer_CreateImage(
         get_instance_dispatch_for_physical(physical_device, &instance_dispatch, nullptr);
 
     if (physical_device != VK_NULL_HANDLE && pCreateInfo && is_bcn_format(pCreateInfo->format)) {
-        const LayerLsfgCompatSnapshot lsfg_compat = snapshot_lsfg_compat();
-        const bool external_memory_image =
-            has_external_memory_image_create_request(*pCreateInfo);
-
-        // LSFG owns the external-memory/AHardwareBuffer image contract.
-        // A virtual BCn image is backed by an internal decoded image with a
-        // replacement format, so rewriting an externally-backed BCn image
-        // would break the creation/query/bind contract expected by LSFG.
-        const bool bypass_bcn_virtualization =
-            lsfg_compat.enabled && external_memory_image;
-
-        if (has_instance_dispatch && !bypass_bcn_virtualization) {
+        if (has_instance_dispatch) {
             VirtualizedImageCreateResult virtualization{};
             if (try_create_virtualized_image(
                     device,

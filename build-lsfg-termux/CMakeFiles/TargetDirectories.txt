@@ -1,0 +1,5 @@
+/data/data/com.termux/files/home/ExynosTools-LSFG/build-lsfg-termux/CMakeFiles/VkLayer_VortekXclipse.dir
+/data/data/com.termux/files/home/ExynosTools-LSFG/build-lsfg-termux/CMakeFiles/exynostools_shaders.dir
+/data/data/com.termux/files/home/ExynosTools-LSFG/build-lsfg-termux/CMakeFiles/exynostools_embedded_shaders.dir
+/data/data/com.termux/files/home/ExynosTools-LSFG/build-lsfg-termux/CMakeFiles/edit_cache.dir
+/data/data/com.termux/files/home/ExynosTools-LSFG/build-lsfg-termux/CMakeFiles/rebuild_cache.dir

@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/data/data/com.termux/files/home/ExynosTools-LSFG/build-lsfg-termux/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

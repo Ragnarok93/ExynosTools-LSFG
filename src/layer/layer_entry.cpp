@@ -637,6 +637,13 @@ InstanceRuntime make_instance_runtime(const VkInstanceCreateInfo* create_info) {
     runtime.is_clvk =
         contains_case_insensitive(runtime.engine_name, "clvk") ||
         contains_case_insensitive(runtime.application_name, "clvk");
+    // The LSFG internal device is identified by an exact app/engine name of
+    // "lsfg-vk-base" (see lsfg-vk-android framegen/src/core/instance.cpp).
+    // Use an exact match rather than a substring so an application that merely
+    // mentions "lsfg" is not misclassified.
+    runtime.is_lsfg_framegen =
+        runtime.application_name == "lsfg-vk-base" ||
+        runtime.engine_name == "lsfg-vk-base";
     return runtime;
 }
 
@@ -4052,7 +4059,23 @@ VKAPI_ATTR VkResult VKAPI_CALL layer_CreateDevice(
         g_device_to_instance_handle[dispatch_key(*pDevice)] = instance;
         g_device_to_physical_handle[dispatch_key(*pDevice)] = physicalDevice;
     }
-    prewarm_compute_runtime_if_needed(*pDevice, device_dispatch, runtime.is_xclipse);
+    // GameNative's LSFG internal device (app/engine name "lsfg-vk-base") only
+    // performs frame generation on ordinary color images and never exercises the
+    // BCn virtualization path. Skip the eager BCn compute-runtime prewarm for
+    // it so ExynosTools does not allocate descriptor/command pools for a device
+    // that will never decode a BCn texture. The lazy init path in
+    // get_or_create_compute_runtime() remains available if a BCn image is ever
+    // created on such a device. BCn virtualization for ordinary application
+    // devices is unaffected.
+    if (runtime.app.is_lsfg_framegen && runtime.is_xclipse) {
+        EXYNOS_LOGI(
+            "Skipping BCn compute runtime prewarm for LSFG frame-generation device "
+            "(app='%s' engine='%s').",
+            runtime.app.application_name.c_str(),
+            runtime.app.engine_name.c_str());
+    } else {
+        prewarm_compute_runtime_if_needed(*pDevice, device_dispatch, runtime.is_xclipse);
+    }
     (void)next_gipa;
     EXYNOS_LOGI(
         "Device runtime app context: app='%s' engine='%s' dxvk=%d dxvk2=%d vkd3d=%d clvk=%d.",

@@ -47,6 +47,15 @@ struct InstanceRuntime {
     bool is_dxvk_2_or_newer = false;
     bool is_vkd3d_proton = false;
     bool is_clvk = false;
+    // GameNative's lsfg-vk-android frame-generation layer creates its own
+    // internal Vulkan instance/device with application/engine name
+    // "lsfg-vk-base". That device only runs Lossless Scaling framegen on
+    // ordinary color (RGBA8/RGBA16F) images and never feeds BCn textures
+    // through the layer, so it does not need the BCn compute runtime. This flag
+    // identifies that internal device so ExynosTools can keep its BCn fallback
+    // active for ordinary application devices while leaving the LSFG internal
+    // device untouched.
+    bool is_lsfg_framegen = false;
 };
 
 struct DeviceRuntime {

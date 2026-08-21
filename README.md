@@ -1,4 +1,4 @@
-# ExynosTools-LSFG â€” Vortek Xclipse Vulkan Compatibility Layer
+# ExynosTools-LSFG Xclipse Vulkan Compatibility Layer
 
 ExynosTools-LSFG is a Vulkan compatibility and performance layer for Samsung
 Xclipse GPUs (Exynos / RDNA-based). It is a fork of

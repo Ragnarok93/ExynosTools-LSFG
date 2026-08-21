@@ -3354,18 +3354,6 @@ bool prepare_virtual_bcn_image_format_query(
         return false;
     }
 
-    // GameNative's LSFG-VK owns the real swapchain/present path and relies
-    // on Android external-memory/AHardwareBuffer handling. Do not let the
-    // BCn virtualization layer rewrite an LSFG-sensitive external-memory
-    // query: the decoded backing-image abstraction cannot safely represent
-    // LSFG's external-memory contract.
-    const LayerLsfgCompatSnapshot lsfg_compat = snapshot_lsfg_compat();
-    if (lsfg_compat.enabled &&
-        is_bcn_format(original_info.format) &&
-        has_incompatible_external_image_request(original_info.pNext)) {
-        return false;
-    }
-
     if (!should_virtualize_bcn_format(
             physicalDevice,
             dispatch,

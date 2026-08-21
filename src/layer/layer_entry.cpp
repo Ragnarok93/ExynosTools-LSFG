@@ -3339,6 +3339,17 @@ bool prepare_virtual_bcn_image_format_query(
     *virtualized = false;
     *query_info = original_info;
 
+    // External-memory image queries must describe the real driver image
+    // contract. BCn virtualization uses an internal decoded backing image
+    // and cannot preserve external/AHardwareBuffer handle compatibility,
+    // so leave these queries unmodified and forward them to the driver with
+    // the original format and external handleType intact. This keeps the
+    // query path consistent with can_virtualize_bcn_image_create_info(),
+    // which already refuses to virtualize externally-backed images.
+    if (has_incompatible_external_image_request(original_info.pNext)) {
+        return false;
+    }
+
     if (has_incompatible_image_view_format_request(original_info)) {
         return false;
     }

@@ -38,24 +38,23 @@ CONTRACT_ARGS=(--repo .)
 if [ -n "${GAMENATIVE_120_ROOT:-}" ]; then
   need git
   CONTRACT_ARGS+=(--gamenative-root "$GAMENATIVE_120_ROOT")
-  echo "CHECK: stock GameNative 1.2.0 source at $GAMENATIVE_120_ROOT"
+  echo "CHECK: exact stock GameNative 1.2.0 source at $GAMENATIVE_120_ROOT"
 else
-  echo 'SKIP: GAMENATIVE_120_ROOT not set; stock GameNative 1.2.0 source pin not checked locally'
+  echo 'SKIP: GAMENATIVE_120_ROOT not set; stock GameNative 1.2.0 source contracts not checked locally'
 fi
 python tests/lsfg_compat_contract.py "${CONTRACT_ARGS[@]}"
 
-if [ -n "${GAMENATIVE_120_WCP:-}" ]; then
-  if [ -z "${GAMENATIVE_120_ROOT:-}" ]; then
-    echo 'FAIL: GAMENATIVE_120_WCP requires GAMENATIVE_120_ROOT'
-    exit 2
+if [ -n "${GAMENATIVE_120_ROOT:-}" ]; then
+  STOCK_ARGS=("$GAMENATIVE_120_ROOT")
+  if [ -n "${GAMENATIVE_120_DRIVER_ZIP:-}" ]; then
+    STOCK_ARGS+=("$GAMENATIVE_120_DRIVER_ZIP")
   fi
-  python tests/gamenative_120_wcp_contract.py \
-    "$GAMENATIVE_120_ROOT" "$GAMENATIVE_120_WCP"
-  echo 'PASS: stock GameNative 1.2.0 Wrapper WCP contract'
-elif [ -n "${GAMENATIVE_120_ROOT:-}" ]; then
-  echo 'SKIP: GAMENATIVE_120_WCP not set; Wrapper WCP package not checked locally'
-else
-  echo 'SKIP: stock GameNative 1.2.0 Wrapper WCP contract (set GAMENATIVE_120_ROOT and GAMENATIVE_120_WCP)'
+  python tests/gamenative_120_stock_wrapper_contract.py "${STOCK_ARGS[@]}"
+  if [ -n "${GAMENATIVE_120_DRIVER_ZIP:-}" ]; then
+    echo 'PASS: stock GameNative 1.2.0 custom-driver ZIP contract'
+  else
+    echo 'SKIP: GAMENATIVE_120_DRIVER_ZIP not set; packaged custom-driver ZIP not checked locally'
+  fi
 fi
 
 if [ -f build-lsfg-termux/libVkLayer_VortekXclipse.so ]; then
@@ -65,10 +64,27 @@ if [ -f build-lsfg-termux/libVkLayer_VortekXclipse.so ]; then
     echo 'FAIL: Android layer contains RPATH/RUNPATH'
     exit 1
   fi
-  echo 'PASS: ARM64 layer ELF and no RPATH/RUNPATH'
+  echo 'PASS: ARM64 ExynosTools compatibility layer ELF'
 else
   echo 'SKIP: build-lsfg-termux/libVkLayer_VortekXclipse.so not present'
 fi
 
+if [ -f build-gamenative-shim/libvulkan_exynostools.so ]; then
+  need readelf
+  readelf -h build-gamenative-shim/libvulkan_exynostools.so | grep -q 'AArch64'
+  readelf -Ws build-gamenative-shim/libvulkan_exynostools.so | \
+    grep -q 'vkGetInstanceProcAddr'
+  readelf -Ws build-gamenative-shim/libvulkan_exynostools.so | \
+    grep -q 'vkCreateInstance'
+  if readelf -d build-gamenative-shim/libvulkan_exynostools.so | grep -E 'RPATH|RUNPATH'; then
+    echo 'FAIL: GameNative driver shim contains RPATH/RUNPATH'
+    exit 1
+  fi
+  echo 'PASS: ARM64 stock-Wrapper driver shim ELF'
+else
+  echo 'SKIP: build-gamenative-shim/libvulkan_exynostools.so not present'
+fi
+
 echo 'PASS: Termux-native LSFG compatibility suite'
-echo 'NOTE: Samsung vendor-ICD execution is validated by tests/android_native_probe, because Android linker namespaces can block the vendor ICD from a raw Termux process.'
+echo 'NOTE: GameNative wrappers remain stock. ExynosTools is validated as the custom driver loaded through the existing AdrenoTools path.'
+echo 'NOTE: Samsung vendor-ICD execution still requires an Android app-process/device test because raw Termux may be blocked by Android linker namespaces.'

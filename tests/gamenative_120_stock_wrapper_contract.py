@@ -42,10 +42,11 @@ def validate_repo(repo: Path) -> None:
     assert meta["libraryName"] == EXPECTED_DRIVER_LIBRARY, meta
     assert meta["layerLibrary"] == EXPECTED_LAYER_LIBRARY, meta
     assert meta["layerName"] == "VK_LAYER_VORTEK_XCLIPSE", meta
-    assert meta["name"].endswith("r4"), meta
+    assert meta["name"].endswith("r5"), meta
     print("PASS: ExynosTools GameNative driver metadata")
 
     shim = read(repo, "src/driver/gamenative_wrapper_shim.cpp")
+    dispatch_key = read(repo, "src/layer/layer_dispatch_key.h")
     require(shim, '"ADRENOTOOLS_DRIVER_PATH"', "stock Wrapper driver-directory input")
     require(shim, '"libVkLayer_VortekXclipse.so"', "ExynosTools compatibility layer host")
 
@@ -61,6 +62,22 @@ def validate_repo(repo: Path) -> None:
     require(shim, "hal_EnumerateInstanceExtensionProperties", "HAL instance extension callback")
     require(shim, "hal_CreateInstance", "HAL instance creation callback")
     require(shim, "hal_GetInstanceProcAddr", "HAL instance proc callback")
+
+    # r4 got through vkCreateInstance but Android libvulkan then overwrote the
+    # first dispatch pointer inside VkInstance before calling
+    # vkEnumeratePhysicalDevices. A normal Vulkan layer keys maps by that first
+    # pointer, so the manually hosted layer lost its instance dispatch record and
+    # returned VK_ERROR_INITIALIZATION_FAILED. r5 must put the layer in an
+    # explicit driver-hosted mode where dispatch keys use the stable handle value.
+    require(shim, 'setenv("EXYNOSTOOLS_DRIVER_HOSTED", "1", 1)', "HAL enables driver-hosted dispatch mode")
+    require(dispatch_key, '"EXYNOSTOOLS_DRIVER_HOSTED"', "dispatch-key hosted-mode marker")
+    require(dispatch_key, "driver_hosted_dispatch_keys", "hosted dispatch-key selector")
+    require(dispatch_key, "stable_handle_key", "stable raw-handle key path")
+    require(dispatch_key, "normal_layer_dispatch_key", "normal layer dispatch-pointer path")
+
+    # r5 diagnostics need to prove that the failure moved beyond physical-device
+    # discovery and, if not, tell us whether the layer or Samsung HAL failed it.
+    require(shim, "HAL vkEnumeratePhysicalDevices", "physical-device enumeration diagnostic")
 
     # r4 must bypass the already-hooked Android libvulkan instance and open the
     # real built-in Samsung HAL through libvndksupport's SP-HAL loader.
@@ -152,7 +169,7 @@ def validate_zip(path: Path) -> None:
         assert "libvulkan_wrapper.so" not in names, "driver ZIP must not replace stock Wrapper"
         meta = json.loads(zf.read("meta.json"))
         assert meta["libraryName"] == EXPECTED_DRIVER_LIBRARY
-        assert meta["name"].endswith("r4")
+        assert meta["name"].endswith("r5")
         for name in required:
             assert zf.getinfo(name).file_size > 0, f"empty driver member: {name}"
     print("PASS: GameNative custom-driver ZIP contract")

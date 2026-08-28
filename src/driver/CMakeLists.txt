@@ -49,7 +49,7 @@ set_target_properties(vulkan_exynostools PROPERTIES
 target_include_directories(vulkan_exynostools PRIVATE "${EXYNOS_SHIM_VULKAN_INCLUDE_DIR}")
 
 if(ANDROID)
-    target_link_libraries(vulkan_exynostools PRIVATE dl)
+    target_link_libraries(vulkan_exynostools PRIVATE dl log)
     find_program(EXYNOS_PATCHELF_EXECUTABLE patchelf)
     if(EXYNOS_PATCHELF_EXECUTABLE)
         add_custom_command(TARGET vulkan_exynostools POST_BUILD

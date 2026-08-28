@@ -1,4 +1,4 @@
-name: LSFG GameNative 1.2.0 Compatibility
+name: Stock GameNative 1.2.0 Driver Compatibility
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fetch stock GameNative 1.2.0 source
+      - name: Fetch exact stock GameNative 1.2.0 source
         run: |
           git init /tmp/GameNative
           git -C /tmp/GameNative remote add origin https://github.com/utkarshdalal/GameNative.git
@@ -29,11 +29,12 @@ jobs:
       - name: Test pinned GameNative contract CLI
         run: python -m unittest discover -s tests -p 'test_lsfg_compat_contract_cli.py' -v
 
-      - name: Verify stock GameNative 1.2.0 source contract
+      - name: Verify stock GameNative and ExynosTools source contracts
         run: |
           python tests/lsfg_compat_contract.py \
             --repo . \
             --gamenative-root /tmp/GameNative
+          python tests/gamenative_120_stock_wrapper_contract.py /tmp/GameNative
 
       - name: Verify LSFG environment state machine
         run: |
@@ -58,11 +59,11 @@ jobs:
       - name: Install Android build prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build patchelf glslc
+          sudo apt-get install -y ninja-build patchelf glslc zip
           git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git /tmp/Vulkan-Headers
           git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Utility-Libraries.git /tmp/Vulkan-Utility-Libraries
 
-      - name: Configure Android ARM64 layer
+      - name: Configure Android ARM64 compatibility layer
         run: |
           cmake -S . -B build-ci -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
@@ -75,17 +76,69 @@ jobs:
             -DEXYNOS_VULKAN_UTILITY_INCLUDE_DIR=/tmp/Vulkan-Utility-Libraries/include \
             -DEXYNOS_VULKAN_UTILITY_SRC_DIR=/tmp/Vulkan-Utility-Libraries/src/vulkan
 
-      - name: Build Android ARM64 layer
+      - name: Build Android ARM64 compatibility layer
         run: cmake --build build-ci --parallel 4
 
-      - name: Verify Android artifact
+      - name: Configure stock-Wrapper driver shim
         run: |
-          test -s build-ci/libVkLayer_VortekXclipse.so
-          file build-ci/libVkLayer_VortekXclipse.so | grep -q 'ARM aarch64'
-          if readelf -d build-ci/libVkLayer_VortekXclipse.so | grep -E 'RPATH|RUNPATH'; then
-            echo 'Android artifact contains forbidden RPATH/RUNPATH'
-            exit 1
-          fi
-          readelf -Ws build-ci/libVkLayer_VortekXclipse.so | grep -q 'vkNegotiateLoaderLayerInterfaceVersion'
-          readelf -Ws build-ci/libVkLayer_VortekXclipse.so | grep -q 'vkGetInstanceProcAddr'
-          readelf -Ws build-ci/libVkLayer_VortekXclipse.so | grep -q 'vkGetDeviceProcAddr'
+          cmake -S src/driver -B build-gamenative-shim -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-35 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DEXYNOS_ROOT="$GITHUB_WORKSPACE" \
+            -DEXYNOS_VULKAN_HEADERS_PATH=/tmp/Vulkan-Headers
+
+      - name: Build stock-Wrapper driver shim
+        run: cmake --build build-gamenative-shim --parallel 4
+
+      - name: Verify ARM64 artifacts
+        run: |
+          set -euxo pipefail
+          LAYER=build-ci/libVkLayer_VortekXclipse.so
+          SHIM=build-gamenative-shim/libvulkan_exynostools.so
+          test -s "$LAYER"
+          test -s "$SHIM"
+          file "$LAYER" "$SHIM" | tee /tmp/exynostools-elf.txt
+          file "$LAYER" | grep -q 'ARM aarch64'
+          file "$SHIM" | grep -q 'ARM aarch64'
+          ! readelf -d "$LAYER" | grep -E 'RPATH|RUNPATH'
+          ! readelf -d "$SHIM" | grep -E 'RPATH|RUNPATH'
+          readelf -Ws "$LAYER" | grep -q 'vkNegotiateLoaderLayerInterfaceVersion'
+          readelf -Ws "$LAYER" | grep -q 'vkGetInstanceProcAddr'
+          readelf -Ws "$LAYER" | grep -q 'vkGetDeviceProcAddr'
+          readelf -Ws "$SHIM" | grep -q 'vkCreateInstance'
+          readelf -Ws "$SHIM" | grep -q 'vkCreateDevice'
+          readelf -Ws "$SHIM" | grep -q 'vkGetInstanceProcAddr'
+          readelf -Ws "$SHIM" | grep -q 'vkGetDeviceProcAddr'
+          strings "$SHIM" | grep -q '/system/lib64/libvulkan.so'
+          strings "$SHIM" | grep -q 'ADRENOTOOLS_DRIVER_PATH'
+          strings "$SHIM" | grep -q 'libVkLayer_VortekXclipse.so'
+
+      - name: Package GameNative custom driver ZIP
+        run: |
+          rm -rf dist stage-driver
+          mkdir -p dist stage-driver
+          cp meta.json stage-driver/meta.json
+          cp build-gamenative-shim/libvulkan_exynostools.so stage-driver/
+          cp build-ci/libVkLayer_VortekXclipse.so stage-driver/
+          cp VkLayer_vortek_xclipse.json stage-driver/
+          (cd stage-driver && zip -9 ../dist/ExynosTools-LSFG-GameNative-1.2.0.zip \
+            meta.json libvulkan_exynostools.so libVkLayer_VortekXclipse.so VkLayer_vortek_xclipse.json)
+          sha256sum dist/ExynosTools-LSFG-GameNative-1.2.0.zip > dist/SHA256SUMS.txt
+
+      - name: Verify packaged driver against untouched GameNative 1.2.0
+        run: |
+          python tests/gamenative_120_stock_wrapper_contract.py \
+            /tmp/GameNative dist/ExynosTools-LSFG-GameNative-1.2.0.zip
+          ! unzip -l dist/ExynosTools-LSFG-GameNative-1.2.0.zip | grep -q 'libvulkan_wrapper.so'
+          ! unzip -l dist/ExynosTools-LSFG-GameNative-1.2.0.zip | grep -q 'profile.json'
+
+      - name: Upload GameNative custom-driver artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExynosTools-LSFG-GameNative-1.2.0-${{ github.sha }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9

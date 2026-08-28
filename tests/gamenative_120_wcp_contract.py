@@ -59,7 +59,6 @@ def main() -> None:
     require(manager_src, "WRAPPER_TRUST_FILES", "Wrapper trusted-file table")
     require(manager_src, "applyContent", "custom content application")
 
-    # Search Kotlin/Java source for the stock custom-wrapper selection contract.
     source_text = "\n".join(
         p.read_text(errors="replace")
         for p in (root / "app/src/main/java").rglob("*")
@@ -69,14 +68,14 @@ def main() -> None:
     require(source_text, "getProfileByEntryName", "custom Wrapper profile lookup")
     require(source_text, "applyContent(wrapperProfile)", "custom Wrapper activation")
 
-    # Stock LSFG manager must still own runtime/layer setup.  Our WCP only
-    # replaces the single Wrapper component; it does not patch GameNative.
+    # Stock LSFG manager must own the frame-generation runtime and implicit layer.
+    # The WCP replaces only GameNative's one Wrapper component.
     require(lsfg_src, "v1.3.3-android-arm64-v8a", "stock LSFG runtime")
-    require(lsfg_src, 'LSFG_PROCESS', "stock LSFG process env")
-    require(lsfg_src, 'LSFG_CONFIG', "stock LSFG config env")
-    require(lsfg_src, 'VK_LAYER_PATH', "stock implicit-layer path")
-    require(lsfg_src, 'VkLayer_LS_frame_generation.json', "stock LSFG manifest")
-    require(lsfg_src, 'liblsfg-vk-layer.so', "stock LSFG layer library")
+    require(lsfg_src, "LSFG_PROCESS", "stock LSFG process env")
+    require(lsfg_src, "LSFG_CONFIG", "stock LSFG config env")
+    require(lsfg_src, "VK_LAYER_PATH", "stock implicit-layer path")
+    require(lsfg_src, "VkLayer_LS_frame_generation.json", "stock LSFG manifest")
+    require(lsfg_src, "liblsfg-vk-layer.so", "stock LSFG layer library")
     require(launcher_src, "LsfgVkManager", "Bionic LSFG launch integration")
 
     assert wcp.is_file(), f"missing WCP: {wcp}"
@@ -84,21 +83,18 @@ def main() -> None:
         names = tf.getnames()
         assert names and names[0] == "profile.json", "profile.json must be first/root entry"
         assert all("/" not in n for n in names), f"WCP must be flat: {names}"
-        expected_archive = {"profile.json", *EXPECTED_FILES.keys(), "WRAPPER_BASE_SHA.txt", "SHA256SUMS.txt", "INSTALL.txt"}
+        expected_archive = {"profile.json", *EXPECTED_FILES.keys()}
         assert set(names) == expected_archive, f"unexpected WCP contents: {names}"
 
         profile_f = tf.extractfile("profile.json")
         assert profile_f is not None
         profile = json.loads(profile_f.read().decode())
-
         assert profile["type"] == "Wrapper"
         assert profile["versionName"] == EXPECTED_WRAPPER_NAME
         assert isinstance(profile["versionCode"], int) and profile["versionCode"] >= 1
         assert profile.get("description")
-        files = profile["files"]
-        got = {entry["source"]: entry["target"] for entry in files}
+        got = {entry["source"]: entry["target"] for entry in profile["files"]}
         assert got == EXPECTED_FILES, f"profile file map mismatch: {got}"
-
         for source in EXPECTED_FILES:
             member = tf.getmember(source)
             assert member.isfile() and member.size > 0, f"bad WCP member: {source}"

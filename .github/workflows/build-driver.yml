@@ -183,9 +183,9 @@ jobs:
           cat > wcp/profile.json <<'JSON'
           {
             "type": "Wrapper",
-            "versionName": "ExynosTools-LSFG",
-            "versionCode": 2026082801,
-            "description": "Pinned Xclipse-compatible Vulkan wrapper for stock GameNative 1.2.0 + LSFG v1.3.3. Preserves LSFG shared-device Vulkan feature state and forwards to the Android system Vulkan stack.",
+            "versionName": "ExynosTools-LSFG-120-r2",
+            "versionCode": 2026082802,
+            "description": "Pinned Xclipse-compatible Vulkan wrapper for stock GameNative 1.2.0 + its bundled LSFG v1.3.3 runtime. Preserves LSFG shared-device Vulkan feature state, emits runtime-proof diagnostics, and forwards to the Android system Vulkan stack.",
             "files": [
               {
                 "source": "libvulkan_wrapper.so",
@@ -213,11 +213,12 @@ jobs:
           cat > dist/INSTALL.txt <<'TXT'
           Stock GameNative 1.2.0 installation:
           1. Import ExynosTools-LSFG-GameNative-1.2.0.wcp through GameNative's Contents Manager.
-          2. In the Bionic container, select Graphics Driver: Wrapper-ExynosTools-LSFG.
+          2. In the Bionic container, select Graphics Driver: Wrapper-ExynosTools-LSFG-120-r2.
           3. Set Graphics Driver Version: System.
           4. Keep Use AdrenoTools Turnip OFF.
           5. Enable LSFG in GameNative.
           6. Do not select the older ExynosTools-Xclipse / ExynosTools-Xclipse-v2 external driver packages.
+          7. For runtime proof, add WRAPPER_DIAG=1 and WRAPPER_DIAG_APPID=lsfg-proof in the container Environment tab, then launch a DXVK/VKD3D title.
           TXT
 
       - name: Validate stock GameNative WCP and LSFG contracts

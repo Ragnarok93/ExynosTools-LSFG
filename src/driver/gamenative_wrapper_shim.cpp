@@ -194,10 +194,9 @@ void log_requested_instance_extensions(const VkInstanceCreateInfo* create_info) 
 }
 
 bool open_real_samsung_hal() {
-    // IMPORTANT: resolve android_load_sphal_library from libvndksupport itself.
-    // GameNative's AdrenoTools patch modifies calls made *from Android libvulkan*;
-    // calling the real SP-HAL helper from this replacement HAL avoids that PLT
-    // hook and opens the built-in Samsung vendor module in the vendor namespace.
+    // Resolve android_load_sphal_library from libvndksupport itself. GameNative's
+    // AdrenoTools patch modifies calls made from Android libvulkan; calling the
+    // real SP-HAL helper here opens Samsung's built-in vendor module directly.
     g_runtime.vndksupport = dlopen(kVndkSupportLibrary, RTLD_NOW | RTLD_LOCAL);
     PFN_android_load_sphal_library load_sphal = nullptr;
     if (g_runtime.vndksupport) {
@@ -233,7 +232,6 @@ bool open_real_samsung_hal() {
         return false;
     }
 
-    // Android libvulkan normally fills this before invoking module->open().
     g_runtime.samsung_module->common.dso = g_runtime.samsung_hal_so;
 
     hw_device_t* raw_device = nullptr;
@@ -273,6 +271,16 @@ bool load_exynos_layer() {
         return false;
     }
 
+    // Critical for the below-loader topology: Android libvulkan installs its
+    // own loader data into dispatchable handles after HAL calls return. Tell the
+    // ExynosTools layer to key its state by stable handle value rather than the
+    // mutable first dispatch pointer. Normal standalone layer operation keeps
+    // the standard dispatch-pointer behavior because this variable is absent.
+    if (setenv("EXYNOSTOOLS_DRIVER_HOSTED", "1", 1) != 0) {
+        shim_log_error("failed to enable EXYNOSTOOLS_DRIVER_HOSTED");
+        return false;
+    }
+
     const std::string layer_path = join_path(driver_dir, kLayerLibrary);
     g_runtime.exynos_layer = dlopen(layer_path.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (!g_runtime.exynos_layer) {
@@ -298,16 +306,16 @@ bool load_exynos_layer() {
         return false;
     }
 
-    shim_log("ExynosTools compatibility layer loaded behind HAL");
+    shim_log("ExynosTools compatibility layer loaded behind HAL (stable handle dispatch keys)");
     return true;
 }
 
 void initialize_runtime() {
-    shim_log("r4 initializing Android Vulkan HAL shim");
+    shim_log("r5 initializing Android Vulkan HAL shim");
     if (!open_real_samsung_hal()) return;
     if (!load_exynos_layer()) return;
     g_runtime.ready = true;
-    shim_log("r4 Android Vulkan HAL shim ready");
+    shim_log("r5 Android Vulkan HAL shim ready");
 }
 
 bool ensure_runtime() {
@@ -402,6 +410,36 @@ VKAPI_ATTR VkResult VKAPI_CALL hal_CreateInstance(
     return result;
 }
 
+VKAPI_ATTR VkResult VKAPI_CALL shim_EnumeratePhysicalDevices(
+    VkInstance instance,
+    uint32_t* pPhysicalDeviceCount,
+    VkPhysicalDevice* pPhysicalDevices) {
+    if (!instance || !pPhysicalDeviceCount || !ensure_runtime() || !g_runtime.layer_gipa) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    auto enumerate = reinterpret_cast<PFN_vkEnumeratePhysicalDevices>(
+        g_runtime.layer_gipa(instance, "vkEnumeratePhysicalDevices"));
+    if (!enumerate) {
+        shim_log_error("layer vkEnumeratePhysicalDevices unavailable");
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    VkResult result = enumerate(instance, pPhysicalDeviceCount, pPhysicalDevices);
+#ifdef __ANDROID__
+    __android_log_print(
+        ANDROID_LOG_INFO,
+        kLogTag,
+        "HAL vkEnumeratePhysicalDevices -> %d count=%u data=%d",
+        result,
+        pPhysicalDeviceCount ? *pPhysicalDeviceCount : 0,
+        pPhysicalDevices ? 1 : 0);
+#else
+    (void)pPhysicalDevices;
+#endif
+    return result;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL shim_CreateDevice(
     VkPhysicalDevice physicalDevice,
     const VkDeviceCreateInfo* pCreateInfo,
@@ -452,8 +490,9 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL hal_GetInstanceProcAddr(
     if (!pName || !ensure_runtime()) return nullptr;
 
     // These functions need shim-owned behavior rather than the layer's raw
-    // entrypoints. In particular vkCreateDevice must inject the synthetic
-    // VkLayerDeviceCreateInfo that our manually hosted layer expects.
+    // entrypoints. vkCreateDevice injects the synthetic device link, while
+    // vkEnumeratePhysicalDevices provides a boundary diagnostic for the first
+    // post-instance operation Android libvulkan performs.
     if (std::strcmp(pName, "vkGetInstanceProcAddr") == 0) {
         return reinterpret_cast<PFN_vkVoidFunction>(hal_GetInstanceProcAddr);
     }
@@ -462,6 +501,9 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL hal_GetInstanceProcAddr(
     }
     if (std::strcmp(pName, "vkCreateInstance") == 0) {
         return reinterpret_cast<PFN_vkVoidFunction>(hal_CreateInstance);
+    }
+    if (std::strcmp(pName, "vkEnumeratePhysicalDevices") == 0) {
+        return reinterpret_cast<PFN_vkVoidFunction>(shim_EnumeratePhysicalDevices);
     }
     if (std::strcmp(pName, "vkCreateDevice") == 0) {
         return reinterpret_cast<PFN_vkVoidFunction>(shim_CreateDevice);
@@ -477,7 +519,6 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL hal_GetInstanceProcAddr(
 }
 
 int hal_CloseDevice(hw_device_t*) {
-    // Android's Vulkan HAL is opened once per process and normally never closed.
     return 0;
 }
 
@@ -510,8 +551,6 @@ int hal_OpenDevice(const hw_module_t*, const char* id, hw_device_t** device) {
 
 }  // namespace
 
-// Android libvulkan looks this symbol up by the literal name "HMI" after
-// AdrenoTools substitutes our custom-driver library for vulkan.samsung.so.
 extern "C" EXYNOS_DRIVER_EXPORT hwvulkan_module_t HAL_MODULE_INFO_SYM = {
     {
         HARDWARE_MODULE_TAG,
@@ -526,9 +565,6 @@ extern "C" EXYNOS_DRIVER_EXPORT hwvulkan_module_t HAL_MODULE_INFO_SYM = {
     },
 };
 
-// Also export conventional Vulkan entrypoints for diagnostics and compatibility
-// with consumers that probe the selected custom-driver .so directly. Android's
-// stock libvulkan path uses the HMI callbacks above.
 extern "C" EXYNOS_DRIVER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL
 vkEnumerateInstanceExtensionProperties(
     const char* pLayerName,

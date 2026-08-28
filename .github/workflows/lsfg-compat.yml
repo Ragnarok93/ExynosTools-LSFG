@@ -7,27 +7,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   contract-and-android-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Apply v1.3.3 migration on work branch
-        if: github.event_name == 'push' && github.ref == 'refs/heads/work/lsfg-gamenative-v133'
-        run: |
-          python tools/apply_gamenative_lsfg_v133.py
-          if ! git diff --quiet; then
-            git config user.name github-actions[bot]
-            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-            git add src/layer/layer_entry.cpp
-            git commit -m 'Adapt BCn prewarm policy to GameNative LSFG v1.3.3'
-            git push
-          fi
 
       - name: Fetch current GameNative LSFG contract
         run: |
@@ -40,6 +26,26 @@ jobs:
             --repo . \
             --lsfg-root /tmp/lsfg-vk-android \
             --manager /tmp/GameNative/app/src/main/java/app/gamenative/utils/LsfgVkManager.kt
+
+      - name: Verify LSFG environment state machine
+        run: |
+          cat >/tmp/lsfg_compat_test.cpp <<'CPP'
+          #include <cstdlib>
+          #include "layer_lsfg_compat.h"
+          int main() {
+            unsetenv("LSFG_PROCESS"); unsetenv("LSFG_CONFIG");
+            if (exynos_lsfg_process_active()) return 1;
+            setenv("LSFG_PROCESS", "gamenative-lsfg", 1);
+            if (exynos_lsfg_process_active()) return 2;
+            setenv("LSFG_CONFIG", "/tmp/conf.toml", 1);
+            if (!exynos_lsfg_process_active()) return 3;
+            const auto s = snapshot_lsfg_compat();
+            return (s.enabled && s.process_environment_present) ? 0 : 4;
+          }
+          CPP
+          c++ -std=c++17 -Wall -Wextra -Werror -Isrc/layer \
+            src/layer/layer_lsfg_compat.cpp /tmp/lsfg_compat_test.cpp -o /tmp/lsfg_compat_test
+          /tmp/lsfg_compat_test
 
       - name: Install Android build prerequisites
         run: |

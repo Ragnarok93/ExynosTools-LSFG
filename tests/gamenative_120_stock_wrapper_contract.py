@@ -52,8 +52,6 @@ def validate_repo(repo: Path) -> None:
 
     # Physical-device r3 logs proved GameNative/AdrenoTools substitutes the
     # selected custom-driver .so at Android libvulkan's *vendor HAL* load site.
-    # Therefore this library must be a hwvulkan HAL module, not another
-    # libvulkan loader/ICD facade.
     require(shim, "HAL_MODULE_INFO_SYM", "Android Vulkan HAL HMI export")
     require(shim, "HWVULKAN_HARDWARE_MODULE_ID", "Android Vulkan HAL module id")
     require(shim, "HWVULKAN_DEVICE_0", "Android Vulkan HAL device id")
@@ -64,23 +62,17 @@ def validate_repo(repo: Path) -> None:
     require(shim, "hal_GetInstanceProcAddr", "HAL instance proc callback")
 
     # r4 got through vkCreateInstance but Android libvulkan then overwrote the
-    # first dispatch pointer inside VkInstance before calling
-    # vkEnumeratePhysicalDevices. A normal Vulkan layer keys maps by that first
-    # pointer, so the manually hosted layer lost its instance dispatch record and
-    # returned VK_ERROR_INITIALIZATION_FAILED. r5 must put the layer in an
-    # explicit driver-hosted mode where dispatch keys use the stable handle value.
+    # first dispatch pointer before vkEnumeratePhysicalDevices. r5 uses stable
+    # handle values only in the manually hosted below-loader mode.
     require(shim, 'setenv("EXYNOSTOOLS_DRIVER_HOSTED", "1", 1)', "HAL enables driver-hosted dispatch mode")
     require(dispatch_key, '"EXYNOSTOOLS_DRIVER_HOSTED"', "dispatch-key hosted-mode marker")
     require(dispatch_key, "driver_hosted_dispatch_keys", "hosted dispatch-key selector")
     require(dispatch_key, "stable_handle_key", "stable raw-handle key path")
     require(dispatch_key, "normal_layer_dispatch_key", "normal layer dispatch-pointer path")
-
-    # r5 diagnostics need to prove that the failure moved beyond physical-device
-    # discovery and, if not, tell us whether the layer or Samsung HAL failed it.
     require(shim, "HAL vkEnumeratePhysicalDevices", "physical-device enumeration diagnostic")
 
-    # r4 must bypass the already-hooked Android libvulkan instance and open the
-    # real built-in Samsung HAL through libvndksupport's SP-HAL loader.
+    # The HAL must bypass the already-hooked Android libvulkan and open the real
+    # Samsung HAL directly through the SP-HAL namespace.
     require(shim, '"libvndksupport.so"', "system SP-HAL support library")
     require(shim, "android_load_sphal_library", "direct SP-HAL loader API")
     require(shim, '"vulkan.samsung.so"', "Samsung Vulkan HAL target")
@@ -88,14 +80,16 @@ def validate_repo(repo: Path) -> None:
     forbid(shim, 'dlopen("/system/lib64/libvulkan.so"', "no recursive raw system-loader open")
     forbid(shim, 'dlopen("/system/lib/libvulkan.so"', "no recursive raw 32-bit system-loader open")
 
-    # The existing ExynosTools layer engine remains hosted below the stock
-    # Wrapper. Synthetic layer-loader records are consumed only by our layer;
-    # the real Samsung HAL receives the original Vulkan pNext chains.
+    # Synthetic loader-chain records are private to the manually hosted layer.
+    # Both instance and device create calls need a final adapter that removes the
+    # synthetic head before entering Samsung's real hwvulkan implementation.
     require(shim, "VkLayerInstanceCreateInfo", "manual layer instance link")
     require(shim, "VkLayerDeviceCreateInfo", "manual layer device link")
     require(shim, "strip_synthetic_instance_link", "instance loader-link sanitization")
     require(shim, "strip_synthetic_device_link", "device loader-link sanitization")
     require(shim, "real_CreateInstance", "sanitized Samsung HAL instance create")
+    require(shim, "real_CreateDevice", "sanitized Samsung HAL device create")
+    require(shim, "Samsung HAL vkCreateDevice", "Samsung device-create diagnostic")
     require(shim, "real_next_gipa", "Samsung HAL next GIPA")
     require(shim, "real_next_gdpa", "Samsung HAL next GDPA")
     require(shim, "layer_link.pfnNextGetInstanceProcAddr = real_next_gipa", "layer chains to Samsung GIPA")

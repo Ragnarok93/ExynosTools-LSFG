@@ -82,9 +82,11 @@ def main() -> None:
     require(source_text, "applyContent(wrapperProfile)", "custom Wrapper activation")
 
     # Stock GameNative 1.2.0 exposes arbitrary per-container environment variables,
-    # so WRAPPER_DIAG=1 can be enabled without modifying the app codebase.
+    # and the Bionic launcher merges them into the process environment. Therefore
+    # WRAPPER_DIAG=1 can be enabled without modifying the app codebase.
     require(env_tab_src, "showEnvVarCreateDialog", "environment variable creation UI")
     require(env_tab_src, "envVars.put(envVarName, envVarValue)", "arbitrary environment variable storage")
+    require(launcher_src, "envVars.putAll(this.envVars)", "custom environment propagation")
 
     # Stock LSFG manager must own the frame-generation runtime and implicit layer.
     # The WCP replaces only GameNative's one Wrapper component.

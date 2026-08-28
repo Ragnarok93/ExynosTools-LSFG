@@ -47,6 +47,59 @@ jobs:
           sed -i 's/#if defined(HAVE_MEMFD_CREATE) \&\& !defined __TERMUX__/#if defined(HAVE_MEMFD_CREATE)/' src/util/anon_file.c
           sed -i "s/dep_libudev = dependency('libudev', required : false)/dep_libudev = null_dep/g" meson.build
 
+      - name: Patch stock GameNative self-selected wrapper path
+        working-directory: wrapper-src
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/vulkan/wrapper/wrapper_instance.c')
+          s = p.read_text()
+          old = '''   if (hooks && path && (stat(path, &sb) == 0)) {
+      char *temp;
+      asprintf(&temp, "%s%s", path, "temp");
+      mkdir(temp, S_IRWXU | S_IRWXG);
+
+      int flags = ADRENOTOOLS_DRIVER_CUSTOM;
+      if (redirect_dir)
+         flags |= ADRENOTOOLS_DRIVER_FILE_REDIRECT;
+        
+      return  adrenotools_open_libvulkan(RTLD_NOW, flags, temp, hooks, path, name, redirect_dir, NULL);
+   }
+   else
+      return dlopen(DEFAULT_VULKAN_PATH, RTLD_NOW | RTLD_LOCAL);
+'''
+          new = '''   /* Stock GameNative's external-driver importer sets ADRENOTOOLS_DRIVER_* to
+    * this wrapper itself. Passing those values back to adrenotools would make
+    * the wrapper recursively load libvulkan_wrapper.so as its downstream ICD.
+    * When we are the selected custom driver, bypass that recursion and forward
+    * directly to Android's system Vulkan loader (Samsung Xclipse on target). */
+   const bool self_selected = name && strcmp(name, "libvulkan_wrapper.so") == 0;
+   if (self_selected) {
+      WRAPPER_LOG(info, "ExynosTools: stock GameNative selected wrapper; forwarding to %s", DEFAULT_VULKAN_PATH);
+      return dlopen(DEFAULT_VULKAN_PATH, RTLD_NOW | RTLD_LOCAL);
+   }
+
+   if (hooks && path && (stat(path, &sb) == 0)) {
+      char *temp;
+      asprintf(&temp, "%s%s", path, "temp");
+      mkdir(temp, S_IRWXU | S_IRWXG);
+
+      int flags = ADRENOTOOLS_DRIVER_CUSTOM;
+      if (redirect_dir)
+         flags |= ADRENOTOOLS_DRIVER_FILE_REDIRECT;
+        
+      return adrenotools_open_libvulkan(RTLD_NOW, flags, temp, hooks, path, name, redirect_dir, NULL);
+   }
+
+   return dlopen(DEFAULT_VULKAN_PATH, RTLD_NOW | RTLD_LOCAL);
+'''
+          if old not in s:
+              raise SystemExit('wrapper_instance.c contract changed; refusing blind patch')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          grep -q 'const bool self_selected' src/vulkan/wrapper/wrapper_instance.c
+          grep -q 'forwarding to %s' src/vulkan/wrapper/wrapper_instance.c
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
@@ -98,9 +151,6 @@ jobs:
           readelf -h "$SO" | grep -q 'Machine:.*AArch64'
           readelf -d "$SO" | tee wrapper-dynamic.txt
 
-          # Meson emits a build-tree RUNPATH for the wrapper. That path is invalid
-          # once the driver is imported on Android. Keep bundled libadrenotools.so
-          # next to the wrapper and use a portable origin-relative lookup instead.
           if readelf -d "$SO" | grep -q 'libadrenotools.so'; then
             patchelf --set-rpath '$ORIGIN' "$SO"
           else
@@ -112,6 +162,9 @@ jobs:
             exit 1
           fi
           readelf -d "$SO" | tee wrapper-dynamic-final.txt
+          readelf -Ws "$SO" | grep -q 'vk_icdGetInstanceProcAddr'
+          readelf -Ws "$SO" | grep -q 'vk_icdNegotiateLoaderICDInterfaceVersion'
+          strings "$SO" | grep -q 'stock GameNative selected wrapper'
           sha256sum "$SO" "$ADRENO" | tee wrapper-sha256.txt
 
       - name: Stage flat GameNative 1.2.0 package
@@ -126,8 +179,8 @@ jobs:
           fi
           cat > package/meta.json <<'JSON'
           {
-            "name": "ExynosTools-Xclipse",
-            "driverVersion": "stock-gamenative-1.2.0",
+            "name": "ExynosTools-Xclipse-v2",
+            "driverVersion": "stock-gamenative-1.2.0-system-icd",
             "libraryName": "libvulkan_wrapper.so"
           }
           JSON
@@ -140,7 +193,7 @@ jobs:
           p = Path('package')
           meta = json.loads((p / 'meta.json').read_text())
           assert set(meta) >= {'name', 'driverVersion', 'libraryName'}
-          assert meta['name'] == 'ExynosTools-Xclipse'
+          assert meta['name'] == 'ExynosTools-Xclipse-v2'
           assert meta['libraryName'] == 'libvulkan_wrapper.so'
           assert (p / meta['libraryName']).is_file()
           assert all(x.is_file() for x in p.iterdir())

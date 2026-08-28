@@ -42,43 +42,52 @@ def validate_repo(repo: Path) -> None:
     assert meta["libraryName"] == EXPECTED_DRIVER_LIBRARY, meta
     assert meta["layerLibrary"] == EXPECTED_LAYER_LIBRARY, meta
     assert meta["layerName"] == "VK_LAYER_VORTEK_XCLIPSE", meta
-    assert meta["name"].endswith("r3"), meta
+    assert meta["name"].endswith("r4"), meta
     print("PASS: ExynosTools GameNative driver metadata")
 
     shim = read(repo, "src/driver/gamenative_wrapper_shim.cpp")
     require(shim, '"ADRENOTOOLS_DRIVER_PATH"', "stock Wrapper driver-directory input")
-    require(shim, '"ADRENOTOOLS_HOOKS_PATH"', "stock Wrapper hooks-directory input")
-    require(shim, '"libadrenotools.so"', "stock Wrapper AdrenoTools runtime reuse")
-    require(shim, "adrenotools_open_libvulkan", "AdrenoTools default-driver open API")
-    require(shim, "open_default(\n        RTLD_NOW,\n        0,", "default-driver featureFlags=0 path")
     require(shim, '"libVkLayer_VortekXclipse.so"', "ExynosTools compatibility layer host")
-    require(shim, "VkLayerInstanceCreateInfo", "manual layer instance link")
-    require(shim, "VkLayerDeviceCreateInfo", "manual layer device link")
-    require(shim, "g_runtime.layer_create_instance", "layer-owned instance creation")
-    require(shim, "g_runtime.layer_create_device", "layer-owned device creation")
 
-    # The outer stock Wrapper loads this library with ADRENOTOOLS_DRIVER_CUSTOM.
-    # A direct nested dlopen of Android's libvulkan would leave that hook active
-    # and redirect the vendor ICD load back to this custom driver. r3 must use a
-    # second AdrenoTools loader configured with featureFlags=0 instead.
+    # Physical-device r3 logs proved GameNative/AdrenoTools substitutes the
+    # selected custom-driver .so at Android libvulkan's *vendor HAL* load site.
+    # Therefore this library must be a hwvulkan HAL module, not another
+    # libvulkan loader/ICD facade.
+    require(shim, "HAL_MODULE_INFO_SYM", "Android Vulkan HAL HMI export")
+    require(shim, "HWVULKAN_HARDWARE_MODULE_ID", "Android Vulkan HAL module id")
+    require(shim, "HWVULKAN_DEVICE_0", "Android Vulkan HAL device id")
+    require(shim, "hwvulkan_device_t", "Android hwvulkan device ABI")
+    require(shim, "hal_OpenDevice", "HAL open callback")
+    require(shim, "hal_EnumerateInstanceExtensionProperties", "HAL instance extension callback")
+    require(shim, "hal_CreateInstance", "HAL instance creation callback")
+    require(shim, "hal_GetInstanceProcAddr", "HAL instance proc callback")
+
+    # r4 must bypass the already-hooked Android libvulkan instance and open the
+    # real built-in Samsung HAL through libvndksupport's SP-HAL loader.
+    require(shim, '"libvndksupport.so"', "system SP-HAL support library")
+    require(shim, "android_load_sphal_library", "direct SP-HAL loader API")
+    require(shim, '"vulkan.samsung.so"', "Samsung Vulkan HAL target")
+    forbid(shim, "adrenotools_open_libvulkan", "no nested AdrenoTools loader recursion")
     forbid(shim, 'dlopen("/system/lib64/libvulkan.so"', "no recursive raw system-loader open")
     forbid(shim, 'dlopen("/system/lib/libvulkan.so"', "no recursive raw 32-bit system-loader open")
-    require(shim, "AdrenoTools default-driver downstream opened", "runtime confirmation of default-driver path")
 
-    # The manually hosted layer still needs loader-link structs, but the real
-    # downstream Vulkan implementation must never receive those private structs.
+    # The existing ExynosTools layer engine remains hosted below the stock
+    # Wrapper. Synthetic layer-loader records are consumed only by our layer;
+    # the real Samsung HAL receives the original Vulkan pNext chains.
+    require(shim, "VkLayerInstanceCreateInfo", "manual layer instance link")
+    require(shim, "VkLayerDeviceCreateInfo", "manual layer device link")
     require(shim, "strip_synthetic_instance_link", "instance loader-link sanitization")
     require(shim, "strip_synthetic_device_link", "device loader-link sanitization")
-    require(shim, "downstream_CreateInstance", "sanitized downstream instance create")
-    require(shim, "downstream_CreateDevice", "sanitized downstream device create")
-    require(shim, "layer_link.pfnNextGetInstanceProcAddr = downstream_gipa", "layer uses sanitized next GIPA")
-    require(shim, "layer_link.pfnNextGetDeviceProcAddr = downstream_gdpa", "layer uses sanitized next GDPA")
+    require(shim, "real_CreateInstance", "sanitized Samsung HAL instance create")
+    require(shim, "real_next_gipa", "Samsung HAL next GIPA")
+    require(shim, "real_next_gdpa", "Samsung HAL next GDPA")
+    require(shim, "layer_link.pfnNextGetInstanceProcAddr = real_next_gipa", "layer chains to Samsung GIPA")
+    require(shim, "layer_link.pfnNextGetDeviceProcAddr = real_next_gdpa", "layer chains to Samsung GDPA")
 
-    require(shim, "vk_icdGetInstanceProcAddr", "ICD instance proc compatibility export")
-    require(shim, "vk_icdGetPhysicalDeviceProcAddr", "ICD physical-device proc compatibility export")
-    require(shim, "vk_icdNegotiateLoaderICDInterfaceVersion", "ICD loader negotiation export")
     require(shim, '"ExynosToolsShim"', "runtime diagnostic log tag")
-    require(shim, "downstream missing requested instance extension", "extension failure diagnostics")
+    require(shim, "Samsung Vulkan HAL opened", "real HAL open diagnostic")
+    require(shim, "HAL vkCreateInstance", "HAL instance diagnostic")
+    require(shim, "HAL vkCreateDevice", "HAL device diagnostic")
 
     assert not (repo / "ci/patch_gamenative_wrapper_lsfg.py").exists(), (
         "GameNative wrapper patcher must not exist"
@@ -143,7 +152,7 @@ def validate_zip(path: Path) -> None:
         assert "libvulkan_wrapper.so" not in names, "driver ZIP must not replace stock Wrapper"
         meta = json.loads(zf.read("meta.json"))
         assert meta["libraryName"] == EXPECTED_DRIVER_LIBRARY
-        assert meta["name"].endswith("r3")
+        assert meta["name"].endswith("r4")
         for name in required:
             assert zf.getinfo(name).file_size > 0, f"empty driver member: {name}"
     print("PASS: GameNative custom-driver ZIP contract")

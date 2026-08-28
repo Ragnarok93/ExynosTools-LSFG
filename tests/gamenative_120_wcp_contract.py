@@ -19,6 +19,15 @@ EXPECTED_FILES = {
     "wrapper_icd.aarch64.json": "${sharedir}/vulkan/icd.d/wrapper_icd.aarch64.json",
     "libadrenotools.so": "${libdir}/libadrenotools.so",
 }
+EXPECTED_WRAPPER_MARKERS = (
+    b"ExynosTools LSFG: preserving shared-device feature chain",
+    b"ExynosTools LSFG: refusing NULL-pNext fallback",
+    b"--- ExynosTools LSFG integration ---",
+    b"contract: GameNative-1.2.0@3491226f",
+    b"backend: %s",
+    b"incoming pNext: %s",
+    b"NULL-pNext fallback: %s",
+)
 
 
 def require(text: str, needle: str, label: str) -> None:
@@ -48,6 +57,10 @@ def main() -> None:
     profile_src = read(root, "app/src/main/java/com/winlator/contents/ContentProfile.java")
     manager_src = read(root, "app/src/main/java/com/winlator/contents/ContentsManager.java")
     lsfg_src = read(root, "app/src/main/java/app/gamenative/utils/LsfgVkManager.kt")
+    env_tab_src = read(
+        root,
+        "app/src/main/java/app/gamenative/ui/component/dialog/EnvironmentTab.kt",
+    )
     launcher_src = read(
         root,
         "app/src/main/java/com/winlator/xenvironment/components/BionicProgramLauncherComponent.java",
@@ -67,6 +80,11 @@ def main() -> None:
     require(source_text, '"Wrapper-$it"', "custom Wrapper UI naming")
     require(source_text, "getProfileByEntryName", "custom Wrapper profile lookup")
     require(source_text, "applyContent(wrapperProfile)", "custom Wrapper activation")
+
+    # Stock GameNative 1.2.0 exposes arbitrary per-container environment variables,
+    # so WRAPPER_DIAG=1 can be enabled without modifying the app codebase.
+    require(env_tab_src, "showEnvVarCreateDialog", "environment variable creation UI")
+    require(env_tab_src, "envVars.put(envVarName, envVarValue)", "arbitrary environment variable storage")
 
     # Stock LSFG manager must own the frame-generation runtime and implicit layer.
     # The WCP replaces only GameNative's one Wrapper component.
@@ -98,6 +116,12 @@ def main() -> None:
         for source in EXPECTED_FILES:
             member = tf.getmember(source)
             assert member.isfile() and member.size > 0, f"bad WCP member: {source}"
+
+        wrapper_f = tf.extractfile("libvulkan_wrapper.so")
+        assert wrapper_f is not None
+        wrapper_bytes = wrapper_f.read()
+        for marker in EXPECTED_WRAPPER_MARKERS:
+            assert marker in wrapper_bytes, f"shipping wrapper missing LSFG marker: {marker!r}"
 
     print("GameNative v1.2.0 custom Wrapper + LSFG WCP contract: PASS")
 

@@ -58,6 +58,13 @@ else
   echo 'SKIP: stock GameNative 1.2.0 Wrapper WCP contract (set GAMENATIVE_120_ROOT and GAMENATIVE_120_WCP)'
 fi
 
+if [ -n "${GAMENATIVE_120_LSFG_DIAG:-}" ]; then
+  python tests/gamenative_lsfg_runtime_diag.py "$GAMENATIVE_120_LSFG_DIAG"
+  echo 'PASS: stock GameNative 1.2.0 LSFG runtime proof'
+else
+  echo 'SKIP: GAMENATIVE_120_LSFG_DIAG not set; exported GameNative Wrapper diagnostic not checked'
+fi
+
 if [ -f build-lsfg-termux/libVkLayer_VortekXclipse.so ]; then
   need readelf
   readelf -h build-lsfg-termux/libVkLayer_VortekXclipse.so | grep -q 'AArch64'
@@ -71,4 +78,5 @@ else
 fi
 
 echo 'PASS: Termux-native LSFG compatibility suite'
-echo 'NOTE: Samsung vendor-ICD execution is validated by tests/android_native_probe, because Android linker namespaces can block the vendor ICD from a raw Termux process.'
+echo 'NOTE: Set WRAPPER_DIAG=1 in stock GameNative 1.2.0, export the resulting wrapper_diag file, and pass it as GAMENATIVE_120_LSFG_DIAG for runtime proof.'
+echo 'NOTE: Samsung vendor-ICD execution is validated from the GameNative/Android app process because Android linker namespaces can block the vendor ICD from a raw Termux process.'

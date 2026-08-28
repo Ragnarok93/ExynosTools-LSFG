@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "name": "Vortek Xclipse Native",
-  "description": "Samsung Xclipse driver package with in-process BCn compatibility wrapper. Set VK_INSTANCE_LAYERS=VK_LAYER_VORTEK_XCLIPSE.",
+  "name": "ExynosTools Xclipse LSFG",
+  "description": "Samsung Xclipse compatibility driver for stock GameNative 1.2.0 wrappers. The stock Wrapper loads libvulkan_exynostools.so through AdrenoTools; the shim hosts the ExynosTools Vulkan compatibility layer and forwards to Android system Vulkan / Samsung ICD.",
   "author": "Vortek / ExynosTools",
-  "packageVersion": "0.1-native-prototype",
+  "packageVersion": "0.2-gamenative-1.2.0",
   "vendor": "SAMSUNG",
-  "driverVersion": "Vulkan 1.4.304",
+  "driverVersion": "System Samsung Vulkan + ExynosTools compatibility",
   "minApi": 35,
-  "libraryName": "vulkan.samsung.so",
+  "libraryName": "libvulkan_exynostools.so",
   "layerLibrary": "libVkLayer_VortekXclipse.so",
   "layerName": "VK_LAYER_VORTEK_XCLIPSE"
 }

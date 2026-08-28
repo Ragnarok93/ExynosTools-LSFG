@@ -31,7 +31,7 @@ No GameNative source modification is required. `WRAPPER_DIAG` is implemented by 
 
 ## 3. Launch an LSFG workload
 
-Launch a Vulkan/DXVK or VKD3D title with LSFG enabled and let it reach normal rendering. The Wrapper emits its report when `vkCreateDevice` completes or fails.
+Launch a **DXVK or VKD3D** title with LSFG enabled and let it reach normal rendering. In the pinned Wrapper these engines redirect the existing `WRAPPER_DIAG` stderr stream into the per-game report file, and the Wrapper emits its device report when `vkCreateDevice` completes or fails.
 
 With `WRAPPER_DIAG_APPID=lsfg-proof`, the default in-container report path is:
 
@@ -40,6 +40,8 @@ With `WRAPPER_DIAG_APPID=lsfg-proof`, the default in-container report path is:
 ```
 
 That path is inside GameNative's private app storage. Raw Termux normally cannot read another app's private directory. Export/copy the report using whatever device-access path is already available in the test environment; the validator only needs the resulting text file.
+
+The Wrapper opens this report in append mode. Reusing the same `WRAPPER_DIAG_APPID` is safe for the validator: it evaluates only the newest `ExynosTools LSFG integration` section, so an older passing run cannot mask a newer failed run.
 
 ## 4. Validate the report
 
@@ -65,7 +67,7 @@ export GAMENATIVE_120_LSFG_DIAG=/path/to/wrapper_diag_lsfg-proof.txt
 tests/termux_lsfg/run.sh
 ```
 
-The runtime validator requires all of these observations in the same Wrapper report:
+The runtime validator requires all of these observations in the same newest Wrapper report section:
 
 - `driver=Samsung (Xclipse)`
 - `contract: GameNative-1.2.0@3491226f`

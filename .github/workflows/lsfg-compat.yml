@@ -26,8 +26,10 @@ jobs:
           git -C /tmp/GameNative checkout --detach FETCH_HEAD
           test "$(git -C /tmp/GameNative rev-parse HEAD)" = "$GAMENATIVE_120_SHA"
 
-      - name: Test pinned GameNative contract CLI
-        run: python -m unittest discover -s tests -p 'test_lsfg_compat_contract_cli.py' -v
+      - name: Test GameNative 1.2.0 compatibility CLIs
+        run: |
+          python -m unittest discover -s tests -p 'test_lsfg_compat_contract_cli.py' -v
+          python -m unittest discover -s tests -p 'test_gamenative_lsfg_runtime_diag.py' -v
 
       - name: Verify stock GameNative 1.2.0 source contract
         run: |

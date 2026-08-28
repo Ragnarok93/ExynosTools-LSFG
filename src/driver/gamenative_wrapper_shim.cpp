@@ -141,6 +141,7 @@ struct ShimRuntime {
     PFN_vkCreateInstance layer_create_instance = nullptr;
     PFN_vkCreateDevice layer_create_device = nullptr;
 
+    PFN_vkCreateDevice samsung_create_device = nullptr;
     PFN_vkGetDeviceProcAddr samsung_gdpa = nullptr;
     VkInstance last_instance = VK_NULL_HANDLE;
     bool ready = false;
@@ -338,6 +339,10 @@ VKAPI_ATTR VkResult VKAPI_CALL real_CreateInstance(
 
     if (result == VK_SUCCESS && *pInstance != VK_NULL_HANDLE) {
         g_runtime.last_instance = *pInstance;
+        g_runtime.samsung_create_device = reinterpret_cast<PFN_vkCreateDevice>(
+            g_runtime.samsung_device->GetInstanceProcAddr(
+                *pInstance,
+                "vkCreateDevice"));
         if (!g_runtime.samsung_gdpa) {
             g_runtime.samsung_gdpa = reinterpret_cast<PFN_vkGetDeviceProcAddr>(
                 g_runtime.samsung_device->GetInstanceProcAddr(
@@ -348,10 +353,44 @@ VKAPI_ATTR VkResult VKAPI_CALL real_CreateInstance(
     return result;
 }
 
+VKAPI_ATTR VkResult VKAPI_CALL real_CreateDevice(
+    VkPhysicalDevice physicalDevice,
+    const VkDeviceCreateInfo* pCreateInfo,
+    const VkAllocationCallbacks* pAllocator,
+    VkDevice* pDevice) {
+    if (!pCreateInfo || !pDevice || !g_runtime.samsung_device) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    if (!g_runtime.samsung_create_device && g_runtime.last_instance != VK_NULL_HANDLE) {
+        g_runtime.samsung_create_device = reinterpret_cast<PFN_vkCreateDevice>(
+            g_runtime.samsung_device->GetInstanceProcAddr(
+                g_runtime.last_instance,
+                "vkCreateDevice"));
+    }
+    if (!g_runtime.samsung_create_device) {
+        shim_log_error("Samsung HAL vkCreateDevice unavailable");
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    VkDeviceCreateInfo clean = *pCreateInfo;
+    clean.pNext = strip_synthetic_device_link(pCreateInfo->pNext);
+    VkResult result = g_runtime.samsung_create_device(
+        physicalDevice,
+        &clean,
+        pAllocator,
+        pDevice);
+    shim_log_result("Samsung HAL vkCreateDevice", result);
+    return result;
+}
+
 PFN_vkVoidFunction VKAPI_CALL real_next_gipa(VkInstance instance, const char* pName) {
     if (!pName || !g_runtime.samsung_device) return nullptr;
     if (std::strcmp(pName, "vkCreateInstance") == 0) {
         return reinterpret_cast<PFN_vkVoidFunction>(real_CreateInstance);
+    }
+    if (std::strcmp(pName, "vkCreateDevice") == 0) {
+        return reinterpret_cast<PFN_vkVoidFunction>(real_CreateDevice);
     }
     return g_runtime.samsung_device->GetInstanceProcAddr(instance, pName);
 }

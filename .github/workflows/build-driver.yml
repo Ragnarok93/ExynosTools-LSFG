@@ -54,51 +54,39 @@ jobs:
           from pathlib import Path
           p = Path('src/vulkan/wrapper/wrapper_instance.c')
           s = p.read_text()
-          old = '''   if (hooks && path && (stat(path, &sb) == 0)) {
-      char *temp;
-      asprintf(&temp, "%s%s", path, "temp");
-      mkdir(temp, S_IRWXU | S_IRWXG);
-
-      int flags = ADRENOTOOLS_DRIVER_CUSTOM;
-      if (redirect_dir)
-         flags |= ADRENOTOOLS_DRIVER_FILE_REDIRECT;
-        
-      return  adrenotools_open_libvulkan(RTLD_NOW, flags, temp, hooks, path, name, redirect_dir, NULL);
-   }
-   else
-      return dlopen(DEFAULT_VULKAN_PATH, RTLD_NOW | RTLD_LOCAL);
-'''
-          new = '''   /* Stock GameNative's external-driver importer sets ADRENOTOOLS_DRIVER_* to
-    * this wrapper itself. Passing those values back to adrenotools would make
-    * the wrapper recursively load libvulkan_wrapper.so as its downstream ICD.
-    * When we are the selected custom driver, bypass that recursion and forward
-    * directly to Android's system Vulkan loader (Samsung Xclipse on target). */
-   const bool self_selected = name && strcmp(name, "libvulkan_wrapper.so") == 0;
-   if (self_selected) {
-      WRAPPER_LOG(info, "ExynosTools: stock GameNative selected wrapper; forwarding to %s", DEFAULT_VULKAN_PATH);
-      return dlopen(DEFAULT_VULKAN_PATH, RTLD_NOW | RTLD_LOCAL);
-   }
-
-   if (hooks && path && (stat(path, &sb) == 0)) {
-      char *temp;
-      asprintf(&temp, "%s%s", path, "temp");
-      mkdir(temp, S_IRWXU | S_IRWXG);
-
-      int flags = ADRENOTOOLS_DRIVER_CUSTOM;
-      if (redirect_dir)
-         flags |= ADRENOTOOLS_DRIVER_FILE_REDIRECT;
-        
-      return adrenotools_open_libvulkan(RTLD_NOW, flags, temp, hooks, path, name, redirect_dir, NULL);
-   }
-
-   return dlopen(DEFAULT_VULKAN_PATH, RTLD_NOW | RTLD_LOCAL);
-'''
-          if old not in s:
-              raise SystemExit('wrapper_instance.c contract changed; refusing blind patch')
-          p.write_text(s.replace(old, new, 1))
+          start = s.index('   if (hooks && path && (stat(path, &sb) == 0)) {')
+          tail = '      return dlopen(DEFAULT_VULKAN_PATH, RTLD_NOW | RTLD_LOCAL);\n}'
+          tail_pos = s.index(tail, start)
+          end = tail_pos + len('      return dlopen(DEFAULT_VULKAN_PATH, RTLD_NOW | RTLD_LOCAL);\n')
+          new_lines = [
+              '   /* Stock GameNative sets ADRENOTOOLS_DRIVER_* to this wrapper itself.',
+              '    * Do not recursively load libvulkan_wrapper.so as the downstream ICD.',
+              '    * Forward directly to Android system Vulkan (Samsung Xclipse on target). */',
+              '   const bool self_selected = name && strcmp(name, "libvulkan_wrapper.so") == 0;',
+              '   if (self_selected) {',
+              '      WRAPPER_LOG(info, "ExynosTools: stock GameNative selected wrapper; forwarding to %s", DEFAULT_VULKAN_PATH);',
+              '      return dlopen(DEFAULT_VULKAN_PATH, RTLD_NOW | RTLD_LOCAL);',
+              '   }',
+              '',
+              '   if (hooks && path && (stat(path, &sb) == 0)) {',
+              '      char *temp;',
+              '      asprintf(&temp, "%s%s", path, "temp");',
+              '      mkdir(temp, S_IRWXU | S_IRWXG);',
+              '',
+              '      int flags = ADRENOTOOLS_DRIVER_CUSTOM;',
+              '      if (redirect_dir)',
+              '         flags |= ADRENOTOOLS_DRIVER_FILE_REDIRECT;',
+              '',
+              '      return adrenotools_open_libvulkan(RTLD_NOW, flags, temp, hooks, path, name, redirect_dir, NULL);',
+              '   }',
+              '',
+              '   return dlopen(DEFAULT_VULKAN_PATH, RTLD_NOW | RTLD_LOCAL);',
+              ''
+          ]
+          p.write_text(s[:start] + '\n'.join(new_lines) + s[end:])
           PY
           grep -q 'const bool self_selected' src/vulkan/wrapper/wrapper_instance.c
-          grep -q 'forwarding to %s' src/vulkan/wrapper/wrapper_instance.c
+          grep -q 'stock GameNative selected wrapper' src/vulkan/wrapper/wrapper_instance.c
 
       - uses: actions/setup-python@v5
         with:
@@ -150,13 +138,11 @@ jobs:
           file "$SO" | grep -q 'ARM aarch64'
           readelf -h "$SO" | grep -q 'Machine:.*AArch64'
           readelf -d "$SO" | tee wrapper-dynamic.txt
-
           if readelf -d "$SO" | grep -q 'libadrenotools.so'; then
             patchelf --set-rpath '$ORIGIN' "$SO"
           else
             patchelf --remove-rpath "$SO"
           fi
-
           if readelf -d "$SO" | grep -E 'android_stub|subprojects|/home/runner|wrapper-src'; then
             echo 'ERROR: build-tree path leaked into final wrapper'
             exit 1
@@ -186,7 +172,6 @@ jobs:
           JSON
           cp wrapper-base.sha package/WRAPPER_BASE_SHA.txt
           sha256sum package/*.so > package/SHA256SUMS.txt
-
           python - <<'PY'
           import json
           from pathlib import Path
@@ -198,7 +183,6 @@ jobs:
           assert (p / meta['libraryName']).is_file()
           assert all(x.is_file() for x in p.iterdir())
           PY
-
           (cd package && zip -9 ../install-shape-test.zip meta.json *.so WRAPPER_BASE_SHA.txt SHA256SUMS.txt)
           test "$(unzip -Z1 install-shape-test.zip | head -1)" = 'meta.json'
           test "$(unzip -Z1 install-shape-test.zip | grep -c '/')" = '0'

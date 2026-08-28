@@ -36,6 +36,38 @@ jobs:
             --gamenative-root /tmp/GameNative
           python tests/gamenative_120_stock_wrapper_contract.py /tmp/GameNative
 
+      - name: Verify driver-hosted dispatch-key stability
+        run: |
+          cat >/tmp/dispatch_key_test.cpp <<'CPP'
+          #include <cstring>
+          #include "layer_dispatch_key.h"
+
+          struct FakeDispatchable {
+            void* dispatch;
+          };
+
+          int main(int argc, char** argv) {
+            if (argc != 2) return 10;
+            FakeDispatchable object{reinterpret_cast<void*>(0x11110000)};
+            FakeDispatchable* handle = &object;
+
+            if (std::strcmp(argv[1], "normal") == 0) {
+              return dispatch_key(handle) == object.dispatch ? 0 : 11;
+            }
+            if (std::strcmp(argv[1], "hosted") == 0) {
+              void* before = dispatch_key(handle);
+              object.dispatch = reinterpret_cast<void*>(0x22220000);
+              void* after = dispatch_key(handle);
+              return (before == handle && after == handle) ? 0 : 12;
+            }
+            return 13;
+          }
+          CPP
+          c++ -std=c++17 -Wall -Wextra -Werror -Isrc/layer \
+            /tmp/dispatch_key_test.cpp -o /tmp/dispatch_key_test
+          env -u EXYNOSTOOLS_DRIVER_HOSTED /tmp/dispatch_key_test normal
+          EXYNOSTOOLS_DRIVER_HOSTED=1 /tmp/dispatch_key_test hosted
+
       - name: Verify LSFG environment state machine
         run: |
           cat >/tmp/lsfg_compat_test.cpp <<'CPP'
@@ -113,12 +145,14 @@ jobs:
           readelf -Ws "$SHIM" | grep -q 'vkGetInstanceProcAddr'
           readelf -Ws "$SHIM" | grep -q 'vkGetDeviceProcAddr'
           strings "$SHIM" | grep -q 'ADRENOTOOLS_DRIVER_PATH'
+          strings "$SHIM" | grep -q 'EXYNOSTOOLS_DRIVER_HOSTED'
           strings "$SHIM" | grep -q 'libvndksupport.so'
           strings "$SHIM" | grep -q 'android_load_sphal_library'
           strings "$SHIM" | grep -q 'vulkan.samsung.so'
           strings "$SHIM" | grep -q 'libVkLayer_VortekXclipse.so'
           strings "$SHIM" | grep -q 'Samsung Vulkan HAL opened'
           strings "$SHIM" | grep -q 'HAL HMI open(vk0)'
+          strings "$SHIM" | grep -q 'HAL vkEnumeratePhysicalDevices'
           strings "$SHIM" | grep -q 'ExynosToolsShim'
           ! strings "$SHIM" | grep -q 'adrenotools_open_libvulkan'
           ! strings "$SHIM" | grep -q '/system/lib64/libvulkan.so'
@@ -131,21 +165,21 @@ jobs:
           cp build-gamenative-shim/libvulkan_exynostools.so stage-driver/
           cp build-ci/libVkLayer_VortekXclipse.so stage-driver/
           cp VkLayer_vortek_xclipse.json stage-driver/
-          (cd stage-driver && zip -9 ../dist/ExynosTools-LSFG-GameNative-1.2.0-r4.zip \
+          (cd stage-driver && zip -9 ../dist/ExynosTools-LSFG-GameNative-1.2.0-r5.zip \
             meta.json libvulkan_exynostools.so libVkLayer_VortekXclipse.so VkLayer_vortek_xclipse.json)
-          sha256sum dist/ExynosTools-LSFG-GameNative-1.2.0-r4.zip > dist/SHA256SUMS.txt
+          sha256sum dist/ExynosTools-LSFG-GameNative-1.2.0-r5.zip > dist/SHA256SUMS.txt
 
       - name: Verify packaged driver against untouched GameNative 1.2.0
         run: |
           python tests/gamenative_120_stock_wrapper_contract.py \
-            /tmp/GameNative dist/ExynosTools-LSFG-GameNative-1.2.0-r4.zip
-          ! unzip -l dist/ExynosTools-LSFG-GameNative-1.2.0-r4.zip | grep -q 'libvulkan_wrapper.so'
-          ! unzip -l dist/ExynosTools-LSFG-GameNative-1.2.0-r4.zip | grep -q 'profile.json'
+            /tmp/GameNative dist/ExynosTools-LSFG-GameNative-1.2.0-r5.zip
+          ! unzip -l dist/ExynosTools-LSFG-GameNative-1.2.0-r5.zip | grep -q 'libvulkan_wrapper.so'
+          ! unzip -l dist/ExynosTools-LSFG-GameNative-1.2.0-r5.zip | grep -q 'profile.json'
 
       - name: Upload GameNative custom-driver artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ExynosTools-LSFG-GameNative-1.2.0-r4-${{ github.sha }}
+          name: ExynosTools-LSFG-GameNative-1.2.0-r5-${{ github.sha }}
           path: dist/*
           if-no-files-found: error
           retention-days: 30

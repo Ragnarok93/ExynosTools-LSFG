@@ -11,6 +11,7 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #if defined(__GNUC__)
 #define EXYNOS_DRIVER_EXPORT __attribute__((visibility("default")))
@@ -21,6 +22,18 @@
 namespace {
 
 constexpr const char* kLogTag = "ExynosToolsShim";
+constexpr const char* kLayerLibrary = "libVkLayer_VortekXclipse.so";
+constexpr const char* kAdrenoToolsLibrary = "libadrenotools.so";
+
+using PFN_adrenotools_open_libvulkan = void* (*)(
+    int dlopenMode,
+    int featureFlags,
+    const char* tmpLibDir,
+    const char* hookLibDir,
+    const char* customDriverDir,
+    const char* customDriverName,
+    const char* fileRedirectDir,
+    void** userMappingHandle);
 
 void shim_log(const char* msg) {
 #ifdef __ANDROID__
@@ -38,7 +51,17 @@ void shim_log_error(const char* msg) {
 #endif
 }
 
+void shim_log_result(const char* api, VkResult result) {
+#ifdef __ANDROID__
+    __android_log_print(ANDROID_LOG_INFO, kLogTag, "%s -> %d", api, result);
+#else
+    (void)api;
+    (void)result;
+#endif
+}
+
 struct ShimRuntime {
+    void* adrenotools = nullptr;
     void* system_vulkan = nullptr;
     void* exynos_layer = nullptr;
 
@@ -61,7 +84,7 @@ struct ShimRuntime {
 ShimRuntime g_runtime;
 std::once_flag g_runtime_once;
 
-std::string join_driver_path(const char* directory, const char* filename) {
+std::string join_path(const char* directory, const char* filename) {
     if (!directory || directory[0] == '\0') {
         return filename;
     }
@@ -97,6 +120,85 @@ const void* strip_synthetic_device_link(const void* pNext) {
     return pNext;
 }
 
+void log_requested_instance_extensions(const VkInstanceCreateInfo* create_info) {
+#ifdef __ANDROID__
+    if (!create_info) return;
+    __android_log_print(
+        ANDROID_LOG_INFO,
+        kLogTag,
+        "vkCreateInstance requested %u extensions",
+        create_info->enabledExtensionCount);
+    for (uint32_t i = 0; i < create_info->enabledExtensionCount; ++i) {
+        const char* name = create_info->ppEnabledExtensionNames
+            ? create_info->ppEnabledExtensionNames[i]
+            : nullptr;
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "  instance-ext[%u]=%s",
+            i,
+            name ? name : "(null)");
+    }
+#else
+    (void)create_info;
+#endif
+}
+
+void log_missing_downstream_instance_extensions(const VkInstanceCreateInfo* create_info) {
+#ifdef __ANDROID__
+    if (!create_info || !g_runtime.system_enumerate_instance_extensions ||
+        create_info->enabledExtensionCount == 0) {
+        return;
+    }
+
+    uint32_t count = 0;
+    VkResult result = g_runtime.system_enumerate_instance_extensions(nullptr, &count, nullptr);
+    if (result != VK_SUCCESS || count == 0) {
+        __android_log_print(
+            ANDROID_LOG_WARN,
+            kLogTag,
+            "downstream extension enumeration failed: result=%d count=%u",
+            result,
+            count);
+        return;
+    }
+
+    std::vector<VkExtensionProperties> props(count);
+    result = g_runtime.system_enumerate_instance_extensions(nullptr, &count, props.data());
+    if (result != VK_SUCCESS && result != VK_INCOMPLETE) {
+        __android_log_print(
+            ANDROID_LOG_WARN,
+            kLogTag,
+            "downstream extension enumeration data failed: result=%d",
+            result);
+        return;
+    }
+
+    for (uint32_t i = 0; i < create_info->enabledExtensionCount; ++i) {
+        const char* requested = create_info->ppEnabledExtensionNames
+            ? create_info->ppEnabledExtensionNames[i]
+            : nullptr;
+        if (!requested) continue;
+        bool found = false;
+        for (uint32_t j = 0; j < count; ++j) {
+            if (std::strcmp(requested, props[j].extensionName) == 0) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            __android_log_print(
+                ANDROID_LOG_ERROR,
+                kLogTag,
+                "downstream missing requested instance extension: %s",
+                requested);
+        }
+    }
+#else
+    (void)create_info;
+#endif
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL downstream_CreateInstance(
     const VkInstanceCreateInfo* pCreateInfo,
     const VkAllocationCallbacks* pAllocator,
@@ -106,7 +208,12 @@ VKAPI_ATTR VkResult VKAPI_CALL downstream_CreateInstance(
     }
     VkInstanceCreateInfo clean = *pCreateInfo;
     clean.pNext = strip_synthetic_instance_link(pCreateInfo->pNext);
-    return g_runtime.system_create_instance(&clean, pAllocator, pInstance);
+    VkResult result = g_runtime.system_create_instance(&clean, pAllocator, pInstance);
+    shim_log_result("downstream vkCreateInstance", result);
+    if (result == VK_ERROR_EXTENSION_NOT_PRESENT) {
+        log_missing_downstream_instance_extensions(&clean);
+    }
+    return result;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL downstream_CreateDevice(
@@ -119,7 +226,9 @@ VKAPI_ATTR VkResult VKAPI_CALL downstream_CreateDevice(
     }
     VkDeviceCreateInfo clean = *pCreateInfo;
     clean.pNext = strip_synthetic_device_link(pCreateInfo->pNext);
-    return g_runtime.system_create_device(physicalDevice, &clean, pAllocator, pDevice);
+    VkResult result = g_runtime.system_create_device(physicalDevice, &clean, pAllocator, pDevice);
+    shim_log_result("downstream vkCreateDevice", result);
+    return result;
 }
 
 PFN_vkVoidFunction VKAPI_CALL downstream_gipa(VkInstance instance, const char* pName);
@@ -146,19 +255,58 @@ PFN_vkVoidFunction VKAPI_CALL downstream_gdpa(VkDevice device, const char* pName
 }
 
 void initialize_runtime() {
-#if defined(__LP64__)
-    constexpr const char* kSystemVulkan = "/system/lib64/libvulkan.so";
-#else
-    constexpr const char* kSystemVulkan = "/system/lib/libvulkan.so";
-#endif
-    constexpr const char* kLayerLibrary = "libVkLayer_VortekXclipse.so";
+    shim_log("r3 initializing stock-Wrapper driver shim");
 
-    shim_log("initializing stock-Wrapper driver shim");
-    g_runtime.system_vulkan = dlopen(kSystemVulkan, RTLD_NOW | RTLD_LOCAL);
-    if (!g_runtime.system_vulkan) {
-        shim_log_error(dlerror());
+    const char* hooks_dir = std::getenv("ADRENOTOOLS_HOOKS_PATH");
+    if (!hooks_dir || hooks_dir[0] == '\0') {
+        shim_log_error("ADRENOTOOLS_HOOKS_PATH is missing");
         return;
     }
+
+    PFN_adrenotools_open_libvulkan open_default =
+        reinterpret_cast<PFN_adrenotools_open_libvulkan>(
+            dlsym(RTLD_DEFAULT, "adrenotools_open_libvulkan"));
+
+    if (!open_default) {
+        const std::string adrenotools_path = join_path(hooks_dir, kAdrenoToolsLibrary);
+        g_runtime.adrenotools = dlopen(adrenotools_path.c_str(), RTLD_NOW | RTLD_LOCAL);
+        if (!g_runtime.adrenotools) {
+            shim_log_error(dlerror());
+            return;
+        }
+        open_default = reinterpret_cast<PFN_adrenotools_open_libvulkan>(
+            dlsym(g_runtime.adrenotools, "adrenotools_open_libvulkan"));
+    }
+
+    if (!open_default) {
+        shim_log_error("adrenotools_open_libvulkan unavailable");
+        return;
+    }
+
+    // Critical: do NOT dlopen /system/lib64/libvulkan.so directly from this
+    // custom-driver namespace. The outer GameNative Wrapper has
+    // ADRENOTOOLS_DRIVER_CUSTOM active, and its hook redirects vendor Vulkan
+    // loads back to this custom driver. Opening a second loader directly would
+    // therefore recurse when that loader asks for vulkan.samsung.so.
+    //
+    // Instead create a nested AdrenoTools loader with featureFlags=0. That is
+    // libadrenotools' supported "default/system driver" path: its own hook
+    // receives no ADRENOTOOLS_DRIVER_CUSTOM flag and is allowed to load the
+    // original Samsung vendor ICD in the appropriate Android linker namespace.
+    g_runtime.system_vulkan = open_default(
+        RTLD_NOW,
+        0,
+        nullptr,
+        hooks_dir,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr);
+    if (!g_runtime.system_vulkan) {
+        shim_log_error("AdrenoTools default-driver open failed");
+        return;
+    }
+    shim_log("AdrenoTools default-driver downstream opened");
 
     g_runtime.system_gipa = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
         dlsym(g_runtime.system_vulkan, "vkGetInstanceProcAddr"));
@@ -181,11 +329,11 @@ void initialize_runtime() {
     if (!g_runtime.system_gipa || !g_runtime.system_gdpa ||
         !g_runtime.system_create_instance || !g_runtime.system_create_device ||
         !g_runtime.system_enumerate_instance_extensions) {
-        shim_log_error("system Vulkan exports incomplete");
+        shim_log_error("default system Vulkan exports incomplete");
         return;
     }
 
-    const std::string layer_path = join_driver_path(
+    const std::string layer_path = join_path(
         std::getenv("ADRENOTOOLS_DRIVER_PATH"), kLayerLibrary);
     g_runtime.exynos_layer = dlopen(layer_path.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (!g_runtime.exynos_layer) {
@@ -212,7 +360,7 @@ void initialize_runtime() {
     }
 
     g_runtime.ready = true;
-    shim_log("stock-Wrapper driver shim ready");
+    shim_log("r3 stock-Wrapper driver shim ready");
 }
 
 bool ensure_runtime() {
@@ -232,6 +380,8 @@ extern "C" EXYNOS_DRIVER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateInstance(
         return VK_ERROR_INITIALIZATION_FAILED;
     }
 
+    log_requested_instance_extensions(pCreateInfo);
+
     VkLayerInstanceLink layer_link{};
     layer_link.pNext = nullptr;
     layer_link.pfnNextGetInstanceProcAddr = downstream_gipa;
@@ -246,9 +396,7 @@ extern "C" EXYNOS_DRIVER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateInstance(
     VkInstanceCreateInfo create_info = *pCreateInfo;
     create_info.pNext = &loader_info;
     VkResult result = g_runtime.layer_create_instance(&create_info, pAllocator, pInstance);
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, kLogTag, "vkCreateInstance -> %d", result);
-#endif
+    shim_log_result("vkCreateInstance", result);
     return result;
 }
 
@@ -276,9 +424,7 @@ extern "C" EXYNOS_DRIVER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     create_info.pNext = &loader_info;
     VkResult result = g_runtime.layer_create_device(
         physicalDevice, &create_info, pAllocator, pDevice);
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, kLogTag, "vkCreateDevice -> %d", result);
-#endif
+    shim_log_result("vkCreateDevice", result);
     return result;
 }
 

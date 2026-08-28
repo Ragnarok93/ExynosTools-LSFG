@@ -1,13 +1,16 @@
-name: LSFG GameNative Compatibility
+name: LSFG GameNative 1.2.0 Compatibility
 
 on:
   push:
-    branches: [work/lsfg-gamenative-v133, main]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
+
+env:
+  GAMENATIVE_120_SHA: 3491226faedb7222a5f8b7248c0247957a060836
 
 jobs:
   contract-and-android-build:
@@ -15,17 +18,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fetch current GameNative LSFG contract
+      - name: Fetch stock GameNative 1.2.0 source
         run: |
-          git clone --depth 1 --branch release https://github.com/GameNative/lsfg-vk-android.git /tmp/lsfg-vk-android
-          git clone --depth 1 https://github.com/utkarshdalal/GameNative.git /tmp/GameNative
+          git init /tmp/GameNative
+          git -C /tmp/GameNative remote add origin https://github.com/utkarshdalal/GameNative.git
+          git -C /tmp/GameNative fetch --depth 1 origin "$GAMENATIVE_120_SHA"
+          git -C /tmp/GameNative checkout --detach FETCH_HEAD
+          test "$(git -C /tmp/GameNative rev-parse HEAD)" = "$GAMENATIVE_120_SHA"
 
-      - name: Verify source contracts
+      - name: Test pinned GameNative contract CLI
+        run: python -m unittest discover -s tests -p 'test_lsfg_compat_contract_cli.py' -v
+
+      - name: Verify stock GameNative 1.2.0 source contract
         run: |
           python tests/lsfg_compat_contract.py \
             --repo . \
-            --lsfg-root /tmp/lsfg-vk-android \
-            --manager /tmp/GameNative/app/src/main/java/app/gamenative/utils/LsfgVkManager.kt
+            --gamenative-root /tmp/GameNative
 
       - name: Verify LSFG environment state machine
         run: |

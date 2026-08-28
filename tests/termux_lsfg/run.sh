@@ -33,7 +33,30 @@ clang++ -std=c++17 -Wall -Wextra -Werror \
   -Isrc/layer src/layer/layer_lsfg_compat.cpp "$TMP/compat.cpp" \
   -o "$TMP/compat"
 "$TMP/compat"
-python tests/lsfg_compat_contract.py --repo .
+
+CONTRACT_ARGS=(--repo .)
+if [ -n "${GAMENATIVE_120_ROOT:-}" ]; then
+  need git
+  CONTRACT_ARGS+=(--gamenative-root "$GAMENATIVE_120_ROOT")
+  echo "CHECK: stock GameNative 1.2.0 source at $GAMENATIVE_120_ROOT"
+else
+  echo 'SKIP: GAMENATIVE_120_ROOT not set; stock GameNative 1.2.0 source pin not checked locally'
+fi
+python tests/lsfg_compat_contract.py "${CONTRACT_ARGS[@]}"
+
+if [ -n "${GAMENATIVE_120_WCP:-}" ]; then
+  if [ -z "${GAMENATIVE_120_ROOT:-}" ]; then
+    echo 'FAIL: GAMENATIVE_120_WCP requires GAMENATIVE_120_ROOT'
+    exit 2
+  fi
+  python tests/gamenative_120_wcp_contract.py \
+    "$GAMENATIVE_120_ROOT" "$GAMENATIVE_120_WCP"
+  echo 'PASS: stock GameNative 1.2.0 Wrapper WCP contract'
+elif [ -n "${GAMENATIVE_120_ROOT:-}" ]; then
+  echo 'SKIP: GAMENATIVE_120_WCP not set; Wrapper WCP package not checked locally'
+else
+  echo 'SKIP: stock GameNative 1.2.0 Wrapper WCP contract (set GAMENATIVE_120_ROOT and GAMENATIVE_120_WCP)'
+fi
 
 if [ -f build-lsfg-termux/libVkLayer_VortekXclipse.so ]; then
   need readelf

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate one Wrapper diagnostic captured from GameNative 1.2.0 + LSFG."""
+"""Validate one Wrapper diagnostic captured from stock GameNative 1.2.0 + LSFG."""
 from __future__ import annotations
 
 import re
@@ -22,20 +22,25 @@ def main() -> None:
         raise SystemExit(f"FAIL: missing diagnostic file: {path}")
     text = path.read_text(errors="replace")
 
-    require(text, "WRAPPER DIAGNOSTICS", "Wrapper diagnostic header")
-    require(text, "driver=Samsung (Xclipse)", "Samsung Xclipse Vulkan driver")
-    require(text, "--- ExynosTools LSFG integration ---", "ExynosTools LSFG diagnostic block")
-    require(text, "contract: GameNative-1.2.0@3491226f", "GameNative 1.2.0 wrapper contract")
-    require(text, "active: yes", "LSFG environment active")
-    require(text, "process: gamenative-lsfg", "stock GameNative LSFG process marker")
-    require(text, "config: set", "stock GameNative LSFG config marker")
-    require(text, "backend: system-vulkan", "system Vulkan backend")
-    require(text, "incoming pNext: present", "incoming LSFG feature pNext chain")
-    require(text, "NULL-pNext fallback: disabled", "unsafe NULL-pNext fallback disabled")
-    require(text, "result: 0 (VK_SUCCESS)", "shared-device vkCreateDevice success")
+    marker = "--- ExynosTools LSFG integration ---"
+    require(text, marker, "ExynosTools LSFG diagnostic block")
+    # WRAPPER_DIAG opens its report with O_APPEND. Validate only the newest
+    # ExynosTools run so an older passing block cannot mask a later failure.
+    latest = marker + text.rsplit(marker, 1)[1]
 
-    device = re.search(r"device:\s*([^\r\n]+)", text)
-    api = re.search(r"apiVersion=([0-9]+\.[0-9]+\.[0-9]+)", text)
+    require(latest, "WRAPPER DIAGNOSTICS", "Wrapper diagnostic header")
+    require(latest, "driver=Samsung (Xclipse)", "Samsung Xclipse Vulkan driver")
+    require(latest, "contract: GameNative-1.2.0@3491226f", "GameNative 1.2.0 wrapper contract")
+    require(latest, "active: yes", "LSFG environment active")
+    require(latest, "process: gamenative-lsfg", "stock GameNative LSFG process marker")
+    require(latest, "config: set", "stock GameNative LSFG config marker")
+    require(latest, "backend: system-vulkan", "system Vulkan backend")
+    require(latest, "incoming pNext: present", "incoming LSFG feature pNext chain")
+    require(latest, "NULL-pNext fallback: disabled", "unsafe NULL-pNext fallback disabled")
+    require(latest, "result: 0 (VK_SUCCESS)", "shared-device vkCreateDevice success")
+
+    device = re.search(r"device:\s*([^\r\n]+)", latest)
+    api = re.search(r"apiVersion=([0-9]+\.[0-9]+\.[0-9]+)", latest)
     if device:
         print(f"INFO: device={device.group(1).strip()}")
     if api:

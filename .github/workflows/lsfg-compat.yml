@@ -114,10 +114,14 @@ jobs:
           readelf -Ws "$SHIM" | grep -q 'vk_icdGetInstanceProcAddr'
           readelf -Ws "$SHIM" | grep -q 'vk_icdGetPhysicalDeviceProcAddr'
           readelf -Ws "$SHIM" | grep -q 'vk_icdNegotiateLoaderICDInterfaceVersion'
-          strings "$SHIM" | grep -q '/system/lib64/libvulkan.so'
           strings "$SHIM" | grep -q 'ADRENOTOOLS_DRIVER_PATH'
+          strings "$SHIM" | grep -q 'ADRENOTOOLS_HOOKS_PATH'
+          strings "$SHIM" | grep -q 'libadrenotools.so'
+          strings "$SHIM" | grep -q 'adrenotools_open_libvulkan'
           strings "$SHIM" | grep -q 'libVkLayer_VortekXclipse.so'
+          strings "$SHIM" | grep -q 'AdrenoTools default-driver downstream opened'
           strings "$SHIM" | grep -q 'ExynosToolsShim'
+          ! strings "$SHIM" | grep -q '/system/lib64/libvulkan.so'
 
       - name: Package GameNative custom driver ZIP
         run: |
@@ -127,21 +131,21 @@ jobs:
           cp build-gamenative-shim/libvulkan_exynostools.so stage-driver/
           cp build-ci/libVkLayer_VortekXclipse.so stage-driver/
           cp VkLayer_vortek_xclipse.json stage-driver/
-          (cd stage-driver && zip -9 ../dist/ExynosTools-LSFG-GameNative-1.2.0-r2.zip \
+          (cd stage-driver && zip -9 ../dist/ExynosTools-LSFG-GameNative-1.2.0-r3.zip \
             meta.json libvulkan_exynostools.so libVkLayer_VortekXclipse.so VkLayer_vortek_xclipse.json)
-          sha256sum dist/ExynosTools-LSFG-GameNative-1.2.0-r2.zip > dist/SHA256SUMS.txt
+          sha256sum dist/ExynosTools-LSFG-GameNative-1.2.0-r3.zip > dist/SHA256SUMS.txt
 
       - name: Verify packaged driver against untouched GameNative 1.2.0
         run: |
           python tests/gamenative_120_stock_wrapper_contract.py \
-            /tmp/GameNative dist/ExynosTools-LSFG-GameNative-1.2.0-r2.zip
-          ! unzip -l dist/ExynosTools-LSFG-GameNative-1.2.0-r2.zip | grep -q 'libvulkan_wrapper.so'
-          ! unzip -l dist/ExynosTools-LSFG-GameNative-1.2.0-r2.zip | grep -q 'profile.json'
+            /tmp/GameNative dist/ExynosTools-LSFG-GameNative-1.2.0-r3.zip
+          ! unzip -l dist/ExynosTools-LSFG-GameNative-1.2.0-r3.zip | grep -q 'libvulkan_wrapper.so'
+          ! unzip -l dist/ExynosTools-LSFG-GameNative-1.2.0-r3.zip | grep -q 'profile.json'
 
       - name: Upload GameNative custom-driver artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ExynosTools-LSFG-GameNative-1.2.0-r2-${{ github.sha }}
+          name: ExynosTools-LSFG-GameNative-1.2.0-r3-${{ github.sha }}
           path: dist/*
           if-no-files-found: error
           retention-days: 30

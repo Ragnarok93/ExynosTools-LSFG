@@ -48,7 +48,7 @@ jobs:
       - name: Install build prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build patchelf glslc
+          sudo apt-get install -y ninja-build patchelf glslc zip
 
       - name: Fetch Vulkan build dependencies
         run: |
@@ -89,23 +89,63 @@ jobs:
 
           sha256sum "$DRIVER" | tee "$BUILD_DIR/SHA256SUMS.txt"
 
-      - name: Stage release package
+      - name: Stage GameNative install package
         run: |
+          rm -rf package
           mkdir -p package
           cp "$BUILD_DIR/libVkLayer_VortekXclipse.so" package/
           cp "$BUILD_DIR/VkLayer_vortek_xclipse.json" package/
           cp "$BUILD_DIR/SHA256SUMS.txt" package/
+
+          cat > package/meta.json <<'JSON'
+          {
+            "name": "ExynosTools-LSFG",
+            "driverVersion": "1.0-gamenative-layer",
+            "libraryName": "libVkLayer_VortekXclipse.so",
+            "packageType": "vulkanLayer",
+            "manifestName": "VkLayer_vortek_xclipse.json",
+            "targetIcd": "system",
+            "variant": "bionic"
+          }
+          JSON
+
           printf '%s\n' \
             "commit=${GITHUB_SHA}" \
             "abi=${ANDROID_ABI}" \
             "platform=${ANDROID_PLATFORM}" \
             "build_type=Release" \
+            "package_type=vulkanLayer" \
+            "target_icd=system" \
             > package/BUILD_INFO.txt
 
-      - name: Upload compiled driver
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('package')
+          meta = json.loads((p / 'meta.json').read_text())
+          assert meta['packageType'] == 'vulkanLayer'
+          assert meta['libraryName'] == 'libVkLayer_VortekXclipse.so'
+          assert (p / meta['libraryName']).is_file()
+          assert (p / meta['manifestName']).is_file()
+          PY
+
+          (cd package && zip -9 -r ../ExynosTools-LSFG-GameNative.zip .)
+          unzip -l ExynosTools-LSFG-GameNative.zip
+          unzip -p ExynosTools-LSFG-GameNative.zip meta.json | python -m json.tool >/dev/null
+
+      - name: Upload GameNative-installable package
         uses: actions/upload-artifact@v4
         with:
-          name: ExynosTools-LSFG-arm64-${{ github.sha }}
+          name: ExynosTools-LSFG-GameNative-${{ github.sha }}
+          path: ExynosTools-LSFG-GameNative.zip
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Upload raw layer files
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExynosTools-LSFG-raw-arm64-${{ github.sha }}
           path: package/
           if-no-files-found: error
           retention-days: 30

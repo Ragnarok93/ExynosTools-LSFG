@@ -1,0 +1,112 @@
+name: Build ExynosTools LSFG Driver
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'shaders/**'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - 'VkLayer_vortek_xclipse.json.in'
+      - '.github/workflows/build-driver.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'shaders/**'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - 'VkLayer_vortek_xclipse.json.in'
+      - '.github/workflows/build-driver.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-driver-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUILD_DIR: build-driver
+  ANDROID_ABI: arm64-v8a
+  ANDROID_PLATFORM: android-35
+
+jobs:
+  build-android-arm64:
+    name: Android ARM64 Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build patchelf glslc
+
+      - name: Fetch Vulkan build dependencies
+        run: |
+          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git /tmp/Vulkan-Headers
+          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Utility-Libraries.git /tmp/Vulkan-Utility-Libraries
+
+      - name: Configure Android ARM64 release build
+        run: |
+          cmake -S . -B "$BUILD_DIR" -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI="$ANDROID_ABI" \
+            -DANDROID_PLATFORM="$ANDROID_PLATFORM" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DEXYNOS_LAYER_USE_LOCAL_VULKAN_REPOS=OFF \
+            -DEXYNOS_LAYER_USE_SUBMODULE_DEPS=OFF \
+            -DEXYNOS_VULKAN_HEADERS_PATH=/tmp/Vulkan-Headers \
+            -DEXYNOS_VULKAN_UTILITY_INCLUDE_DIR=/tmp/Vulkan-Utility-Libraries/include \
+            -DEXYNOS_VULKAN_UTILITY_SRC_DIR=/tmp/Vulkan-Utility-Libraries/src/vulkan
+
+      - name: Compile driver
+        run: cmake --build "$BUILD_DIR" --parallel "$(nproc)"
+
+      - name: Validate driver ELF
+        run: |
+          DRIVER="$BUILD_DIR/libVkLayer_VortekXclipse.so"
+          test -s "$DRIVER"
+          file "$DRIVER" | tee "$BUILD_DIR/driver-file.txt"
+          file "$DRIVER" | grep -q 'ARM aarch64'
+
+          if readelf -d "$DRIVER" | grep -E 'RPATH|RUNPATH'; then
+            echo 'ERROR: Android driver contains an RPATH/RUNPATH.'
+            exit 1
+          fi
+
+          readelf -Ws "$DRIVER" | grep -q 'vkNegotiateLoaderLayerInterfaceVersion'
+          readelf -Ws "$DRIVER" | grep -q 'vkGetInstanceProcAddr'
+          readelf -Ws "$DRIVER" | grep -q 'vkGetDeviceProcAddr'
+
+          sha256sum "$DRIVER" | tee "$BUILD_DIR/SHA256SUMS.txt"
+
+      - name: Stage release package
+        run: |
+          mkdir -p package
+          cp "$BUILD_DIR/libVkLayer_VortekXclipse.so" package/
+          cp "$BUILD_DIR/VkLayer_vortek_xclipse.json" package/
+          cp "$BUILD_DIR/SHA256SUMS.txt" package/
+          printf '%s\n' \
+            "commit=${GITHUB_SHA}" \
+            "abi=${ANDROID_ABI}" \
+            "platform=${ANDROID_PLATFORM}" \
+            "build_type=Release" \
+            > package/BUILD_INFO.txt
+
+      - name: Upload compiled driver
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExynosTools-LSFG-arm64-${{ github.sha }}
+          path: package/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9

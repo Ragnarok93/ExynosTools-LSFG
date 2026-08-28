@@ -1,44 +1,74 @@
-# GameNative / Eden LSFG Integration Boundary
+# GameNative LSFG Integration Boundary
 
-## Purpose
+## Current compatibility target
 
-ExynosTools-LSFG is a Vulkan compatibility layer for Xclipse. Its BCn virtualization must remain available for applications that need it, but it should not compete with GameNative's native `lsfg-vk-android` frame-generation implementation.
+This document tracks the Android LSFG runtime currently shipped by GameNative as `v1.3.3-android-arm64-v8a` and the current `GameNative/lsfg-vk-android` release architecture.
 
-## Verified GameNative architecture
+GameNative arms the Vulkan layer with `LSFG_PROCESS=gamenative-lsfg` and a non-empty `LSFG_CONFIG`. ExynosTools treats that environment pair as the authoritative process marker. The old `lsfg-vk-base` application/engine-name classification is retained only for compatibility with older LSFG builds.
 
-GameNative includes `GameNative/lsfg-vk-android` as the `app/src/main/cpp/lsfg-vk-android` submodule. The Android port uses an independent Vulkan device for frame generation and shares images with the host through `AHardwareBuffer` rather than opaque file descriptors.
+## GameNative v1.3.3 architecture
 
-The frame-generation implementation creates its own Vulkan instance with:
+The current Android path is **single-device frame generation**. It does not create an independent frame-generation Vulkan device and it does not use AHardwareBuffer as the primary working-image bridge.
 
-- application name: `lsfg-vk-base`
-- engine name: `lsfg-vk-base`
-- Vulkan API: 1.3
+On Android, `lsfg-vk-android`:
 
-Its Android image path imports caller-provided `AHardwareBuffer*` through `VK_ANDROID_external_memory_android_hardware_buffer` and keeps the shared image in `VK_IMAGE_LAYOUT_GENERAL`.
+1. hooks the game's Vulkan instance/device and swapchain;
+2. merges the supported storage-image, FP16 and Vulkan-memory-model features needed by framegen into the game's `VkDeviceCreateInfo`;
+3. creates RGBA working images directly on the game's existing `VkDevice` with storage, sampled, transfer-source and transfer-destination usage;
+4. calls `LSFG_3_1{P}::initializeExternal(...)` with the game's instance, physical device, device, queue family and queue;
+5. calls `createContextFromImages(...)` with those device-local images;
+6. runs frame generation on that same device/queue and copies generated output back into the game presentation path.
 
-## Consequences for ExynosTools
+GameNative still requests/filter-checks external-memory/external-semaphore FD extensions in its layer setup, so ExynosTools must continue to expose the real Xclipse extension contract unchanged.
 
-1. **Do not remove BCn virtualization.** GameNative's BCn path and ExynosTools' fallback solve different compatibility problems.
-2. **Do not decode GameNative's LSFG images.** The LSFG device's working images are normal color images supplied through AHB; BCn interception should naturally remain inactive for them.
-3. **Avoid unnecessary BCn compute-runtime initialization for the LSFG internal device.** ExynosTools currently prewarms its BCn compute runtime for every detected Xclipse device. The GameNative LSFG device is a separate Xclipse Vulkan device and does not need this BCn prewarm.
-4. **Preserve AHB/external-memory semantics.** The LSFG Android path depends on the AHB external-memory extension chain and dedicated imports. ExynosTools must not rewrite those requests as part of BCn virtualization.
-5. **Keep LSFG frame-generation resources opaque to BCn routing.** Copy/blit interception should only take the special BCn path when the tracked image route actually involves a virtualized BCn image.
+## ExynosTools policy for LSFG
 
-## Recommended next implementation slice
+ExynosTools must remain transparent to LSFG's device requirements while retaining BCn virtualization for the game itself.
 
-Add an explicit `is_lsfg_framegen_device` runtime classification using the instance application/engine names above. Use it first as a conservative policy gate to skip ExynosTools BCn compute prewarm on that internal device. Do not disable general Vulkan layer functionality, AHB support, synchronization, or image tracking.
+- Never fabricate an LSFG-required feature. Forward the Samsung/Xclipse feature result and preserve GameNative's feature-enable pNext structures.
+- Never hide Xclipse extensions required by GameNative. Xclipse devices are excluded from the non-Xclipse extension-hide quirks.
+- Do not inject optional descriptor-buffer behavior into an LSFG-marked process. GameNative owns the shared device feature contract.
+- Skip eager BCn compute-runtime prewarm when `LSFG_PROCESS` + `LSFG_CONFIG` identify the shared LSFG/game device. BCn remains lazy-enabled if the game later uses a virtual BC format.
+- Do not virtualize externally-backed BCn images in an LSFG process. External-memory image contracts must stay native.
+- Ordinary LSFG working images (`R16G16B16A16_SFLOAT` or `R8G8B8A8_UNORM`) are not BC formats and therefore naturally bypass BCn virtualization.
+- Copy/blit interception may only route through ExynosTools' special path when tracked images actually involve a virtual BCn image.
 
-After that change is verified, add diagnostics showing:
+## Xclipse 940 evidence already captured
 
-- LSFG internal-device detection;
-- BCn virtual-image count on that device;
-- BCn special-copy/decode hits on that device;
-- whether any AHB-backed image entered a BCn virtualization route.
+The repository's device-validation history recorded Samsung Xclipse 940 / Vulkan 1.3.279 exposing the requirements used by GameNative v1.3.3:
 
-A successful GameNative integration should show an LSFG internal device with zero BCn virtualization hits while retaining the BCn fallback for ordinary application devices.
+- `shaderStorageImageExtendedFormats = YES`
+- `shaderStorageImageReadWithoutFormat = YES`
+- `shaderStorageImageWriteWithoutFormat = YES`
+- `shaderInt16 = YES`
+- Vulkan 1.2/1.3 support including timeline semaphore and synchronization2
+- `VK_KHR_shader_float16_int8`
+- `VK_KHR_vulkan_memory_model`
+- `VK_KHR_external_memory` and `VK_KHR_external_memory_fd`
+- `VK_KHR_external_semaphore` and `VK_KHR_external_semaphore_fd`
+- OPAQUE_FD memory import/export support
+- OPAQUE_FD and SYNC_FD semaphore import/export support
 
-## Source evidence
+Those observations establish that the raw Xclipse 940 driver is not missing the fundamental Vulkan capabilities required by the current LSFG path. They do not replace an end-to-end GameNative presentation test.
 
-The GameNative submodule is declared in GameNative's `.gitmodules` and points to `GameNative/lsfg-vk-android`.
+## Validation gates
 
-The Android frame-generation repository documents the AHB-specific API and image path. Its `Device` implementation identifies the compute device independently and requires Android external-memory extensions; its `Image` implementation imports `AHardwareBuffer` directly.
+`tests/lsfg_compat_contract.py` checks the source-level contract against the current upstream GameNative LSFG release and GameNative manager. CI deliberately clones those upstream repositories so a future architecture or environment-variable change breaks the compatibility check instead of silently drifting.
+
+`tests/termux_lsfg/run.sh` validates the LSFG environment state machine and an existing Termux-built layer ELF. The Samsung vendor ICD itself must be exercised from an Android application process because Android linker namespaces can prevent a raw Termux process from loading vendor Vulkan dependencies. `tests/android_native_probe` remains the native-Android ICD/layer validation path.
+
+## End-to-end acceptance criteria
+
+A device run is considered LSFG-compatible only when all of these are observed on an Xclipse device:
+
+1. baseline Samsung Vulkan instance/device creation succeeds;
+2. ExynosTools layer creation succeeds with the Samsung ICD as backend;
+3. GameNative discovers and loads `VK_LAYER_LS_frame_generation` together with ExynosTools;
+4. `LSFG_PROCESS` and `LSFG_CONFIG` are present in the game process;
+5. GameNative creates its single-device framegen context without `VK_ERROR_FEATURE_NOT_PRESENT`, `VK_ERROR_EXTENSION_NOT_PRESENT`, `VK_ERROR_DEVICE_LOST`, or a watchdog stall;
+6. generated-frame presentation increases measured output FPS above base FPS for multiplier > 1;
+7. framegen output remains visually coherent through motion and scene changes;
+8. BCn titles still use ExynosTools virtualization when required and LSFG color working images never enter the BCn route;
+9. disabling LSFG restores normal game presentation without requiring a different ExynosTools package.
+
+Passing CI proves source/build compatibility. Passing the Android-native probe proves Samsung ICD/layer execution. Only the final GameNative device run proves end-to-end frame generation.

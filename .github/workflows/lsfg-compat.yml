@@ -1,0 +1,83 @@
+name: LSFG GameNative Compatibility
+
+on:
+  push:
+    branches: [work/lsfg-gamenative-v133, main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract-and-android-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch current GameNative LSFG contract
+        run: |
+          git clone --depth 1 --branch release https://github.com/GameNative/lsfg-vk-android.git /tmp/lsfg-vk-android
+          git clone --depth 1 https://github.com/utkarshdalal/GameNative.git /tmp/GameNative
+
+      - name: Verify source contracts
+        run: |
+          python tests/lsfg_compat_contract.py \
+            --repo . \
+            --lsfg-root /tmp/lsfg-vk-android \
+            --manager /tmp/GameNative/app/src/main/java/app/gamenative/utils/LsfgVkManager.kt
+
+      - name: Verify LSFG environment state machine
+        run: |
+          cat >/tmp/lsfg_compat_test.cpp <<'CPP'
+          #include <cstdlib>
+          #include "layer_lsfg_compat.h"
+          int main() {
+            unsetenv("LSFG_PROCESS"); unsetenv("LSFG_CONFIG");
+            if (exynos_lsfg_process_active()) return 1;
+            setenv("LSFG_PROCESS", "gamenative-lsfg", 1);
+            if (exynos_lsfg_process_active()) return 2;
+            setenv("LSFG_CONFIG", "/tmp/conf.toml", 1);
+            if (!exynos_lsfg_process_active()) return 3;
+            const auto s = snapshot_lsfg_compat();
+            return (s.enabled && s.process_environment_present) ? 0 : 4;
+          }
+          CPP
+          c++ -std=c++17 -Wall -Wextra -Werror -Isrc/layer \
+            src/layer/layer_lsfg_compat.cpp /tmp/lsfg_compat_test.cpp -o /tmp/lsfg_compat_test
+          /tmp/lsfg_compat_test
+
+      - name: Install Android build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build patchelf glslc
+          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git /tmp/Vulkan-Headers
+          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Utility-Libraries.git /tmp/Vulkan-Utility-Libraries
+
+      - name: Configure Android ARM64 layer
+        run: |
+          cmake -S . -B build-ci -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-35 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DEXYNOS_LAYER_USE_LOCAL_VULKAN_REPOS=OFF \
+            -DEXYNOS_LAYER_USE_SUBMODULE_DEPS=OFF \
+            -DEXYNOS_VULKAN_HEADERS_PATH=/tmp/Vulkan-Headers \
+            -DEXYNOS_VULKAN_UTILITY_INCLUDE_DIR=/tmp/Vulkan-Utility-Libraries/include \
+            -DEXYNOS_VULKAN_UTILITY_SRC_DIR=/tmp/Vulkan-Utility-Libraries/src/vulkan
+
+      - name: Build Android ARM64 layer
+        run: cmake --build build-ci --parallel 4
+
+      - name: Verify Android artifact
+        run: |
+          test -s build-ci/libVkLayer_VortekXclipse.so
+          file build-ci/libVkLayer_VortekXclipse.so | grep -q 'ARM aarch64'
+          if readelf -d build-ci/libVkLayer_VortekXclipse.so | grep -E 'RPATH|RUNPATH'; then
+            echo 'Android artifact contains forbidden RPATH/RUNPATH'
+            exit 1
+          fi
+          readelf -Ws build-ci/libVkLayer_VortekXclipse.so | grep -q 'vkNegotiateLoaderLayerInterfaceVersion'
+          readelf -Ws build-ci/libVkLayer_VortekXclipse.so | grep -q 'vkGetInstanceProcAddr'
+          readelf -Ws build-ci/libVkLayer_VortekXclipse.so | grep -q 'vkGetDeviceProcAddr'

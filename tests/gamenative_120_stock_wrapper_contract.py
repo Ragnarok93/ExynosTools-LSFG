@@ -42,34 +42,43 @@ def validate_repo(repo: Path) -> None:
     assert meta["libraryName"] == EXPECTED_DRIVER_LIBRARY, meta
     assert meta["layerLibrary"] == EXPECTED_LAYER_LIBRARY, meta
     assert meta["layerName"] == "VK_LAYER_VORTEK_XCLIPSE", meta
+    assert meta["name"].endswith("r3"), meta
     print("PASS: ExynosTools GameNative driver metadata")
 
     shim = read(repo, "src/driver/gamenative_wrapper_shim.cpp")
     require(shim, '"ADRENOTOOLS_DRIVER_PATH"', "stock Wrapper driver-directory input")
-    require(shim, '"/system/lib64/libvulkan.so"', "system Vulkan downstream")
+    require(shim, '"ADRENOTOOLS_HOOKS_PATH"', "stock Wrapper hooks-directory input")
+    require(shim, '"libadrenotools.so"', "stock Wrapper AdrenoTools runtime reuse")
+    require(shim, "adrenotools_open_libvulkan", "AdrenoTools default-driver open API")
+    require(shim, "open_default(\n        RTLD_NOW,\n        0,", "default-driver featureFlags=0 path")
     require(shim, '"libVkLayer_VortekXclipse.so"', "ExynosTools compatibility layer host")
     require(shim, "VkLayerInstanceCreateInfo", "manual layer instance link")
     require(shim, "VkLayerDeviceCreateInfo", "manual layer device link")
     require(shim, "g_runtime.layer_create_instance", "layer-owned instance creation")
     require(shim, "g_runtime.layer_create_device", "layer-owned device creation")
 
-    # The manually hosted layer needs loader-link structs, but Android's real
-    # libvulkan must never receive those private structs. The downstream
-    # adapters strip only our synthetic head node while preserving the original
-    # GameNative/LSFG pNext chain.
+    # The outer stock Wrapper loads this library with ADRENOTOOLS_DRIVER_CUSTOM.
+    # A direct nested dlopen of Android's libvulkan would leave that hook active
+    # and redirect the vendor ICD load back to this custom driver. r3 must use a
+    # second AdrenoTools loader configured with featureFlags=0 instead.
+    forbid(shim, 'dlopen("/system/lib64/libvulkan.so"', "no recursive raw system-loader open")
+    forbid(shim, 'dlopen("/system/lib/libvulkan.so"', "no recursive raw 32-bit system-loader open")
+    require(shim, "AdrenoTools default-driver downstream opened", "runtime confirmation of default-driver path")
+
+    # The manually hosted layer still needs loader-link structs, but the real
+    # downstream Vulkan implementation must never receive those private structs.
     require(shim, "strip_synthetic_instance_link", "instance loader-link sanitization")
     require(shim, "strip_synthetic_device_link", "device loader-link sanitization")
     require(shim, "downstream_CreateInstance", "sanitized downstream instance create")
     require(shim, "downstream_CreateDevice", "sanitized downstream device create")
     require(shim, "layer_link.pfnNextGetInstanceProcAddr = downstream_gipa", "layer uses sanitized next GIPA")
     require(shim, "layer_link.pfnNextGetDeviceProcAddr = downstream_gdpa", "layer uses sanitized next GDPA")
-    forbid(shim, "layer_link.pfnNextGetInstanceProcAddr = g_runtime.system_gipa", "no raw system GIPA in synthetic link")
-    forbid(shim, "layer_link.pfnNextGetDeviceProcAddr = g_runtime.system_gdpa", "no raw system GDPA in synthetic link")
 
     require(shim, "vk_icdGetInstanceProcAddr", "ICD instance proc compatibility export")
     require(shim, "vk_icdGetPhysicalDeviceProcAddr", "ICD physical-device proc compatibility export")
     require(shim, "vk_icdNegotiateLoaderICDInterfaceVersion", "ICD loader negotiation export")
     require(shim, '"ExynosToolsShim"', "runtime diagnostic log tag")
+    require(shim, "downstream missing requested instance extension", "extension failure diagnostics")
 
     assert not (repo / "ci/patch_gamenative_wrapper_lsfg.py").exists(), (
         "GameNative wrapper patcher must not exist"
@@ -134,6 +143,7 @@ def validate_zip(path: Path) -> None:
         assert "libvulkan_wrapper.so" not in names, "driver ZIP must not replace stock Wrapper"
         meta = json.loads(zf.read("meta.json"))
         assert meta["libraryName"] == EXPECTED_DRIVER_LIBRARY
+        assert meta["name"].endswith("r3")
         for name in required:
             assert zf.getinfo(name).file_size > 0, f"empty driver member: {name}"
     print("PASS: GameNative custom-driver ZIP contract")

@@ -24,6 +24,12 @@ def require(text: str, needle: str, label: str) -> None:
     print(f"PASS: {label}")
 
 
+def forbid(text: str, needle: str, label: str) -> None:
+    if needle in text:
+        raise AssertionError(f"{label}: forbidden {needle!r}")
+    print(f"PASS: {label}")
+
+
 def read(root: Path, rel: str) -> str:
     path = root / rel
     if not path.is_file():
@@ -46,6 +52,24 @@ def validate_repo(repo: Path) -> None:
     require(shim, "VkLayerDeviceCreateInfo", "manual layer device link")
     require(shim, "g_runtime.layer_create_instance", "layer-owned instance creation")
     require(shim, "g_runtime.layer_create_device", "layer-owned device creation")
+
+    # The manually hosted layer needs loader-link structs, but Android's real
+    # libvulkan must never receive those private structs. The downstream
+    # adapters strip only our synthetic head node while preserving the original
+    # GameNative/LSFG pNext chain.
+    require(shim, "strip_synthetic_instance_link", "instance loader-link sanitization")
+    require(shim, "strip_synthetic_device_link", "device loader-link sanitization")
+    require(shim, "downstream_CreateInstance", "sanitized downstream instance create")
+    require(shim, "downstream_CreateDevice", "sanitized downstream device create")
+    require(shim, "layer_link.pfnNextGetInstanceProcAddr = downstream_gipa", "layer uses sanitized next GIPA")
+    require(shim, "layer_link.pfnNextGetDeviceProcAddr = downstream_gdpa", "layer uses sanitized next GDPA")
+    forbid(shim, "layer_link.pfnNextGetInstanceProcAddr = g_runtime.system_gipa", "no raw system GIPA in synthetic link")
+    forbid(shim, "layer_link.pfnNextGetDeviceProcAddr = g_runtime.system_gdpa", "no raw system GDPA in synthetic link")
+
+    require(shim, "vk_icdGetInstanceProcAddr", "ICD instance proc compatibility export")
+    require(shim, "vk_icdGetPhysicalDeviceProcAddr", "ICD physical-device proc compatibility export")
+    require(shim, "vk_icdNegotiateLoaderICDInterfaceVersion", "ICD loader negotiation export")
+    require(shim, '"ExynosToolsShim"', "runtime diagnostic log tag")
 
     assert not (repo / "ci/patch_gamenative_wrapper_lsfg.py").exists(), (
         "GameNative wrapper patcher must not exist"
@@ -91,7 +115,6 @@ def validate_gamenative(root: Path) -> None:
     require(lsfg, 'ENV_PROCESS = "LSFG_PROCESS"', "stock LSFG process marker")
     require(lsfg, 'RUNTIME_VERSION = "v1.3.3-android-arm64-v8a"', "stock bundled LSFG runtime")
 
-    # Custom container env must be merged before GameNative adds its LSFG env.
     assert launcher.index("envVars.putAll(this.envVars)") < launcher.index(
         "LsfgVkManager.applyLaunchEnv"
     )

@@ -4,19 +4,22 @@
 The July 2026 gn_wrapper2 source already has lazy, opt-in GPU BCn transcode, so
 we deliberately do not replace its BCn implementation.  The important shared-
 device hazard is WRAPPER_SAFE_CREATE_DEVICE: upstream retries a failed device
-create with pNext=NULL.  LSFG v1.3.3 merges shaderFloat16/vulkanMemoryModel and
-other required feature state into the game's device-create chain, so that retry
-can make the game start with an LSFG-incapable VkDevice.
+create with pNext=NULL.  Stock GameNative 1.2.0 bundles an LSFG runtime named
+v1.3.3-android-arm64-v8a; that runtime merges shaderFloat16/vulkanMemoryModel
+and other required feature state into the game's device-create chain, so the
+NULL-pNext retry can make the game start with an LSFG-incapable VkDevice.
 
 For an LSFG process this patch therefore:
   * never drops the VkDeviceCreateInfo pNext chain;
   * disables optional wrapper device-fault injection to keep the shared-device
     chain as close as possible to the game's + LSFG's requested state;
   * forces the optional GPU BCn transcode path off even if globally requested;
+  * annotates WRAPPER_DIAG with the pinned GameNative contract, LSFG markers,
+    backend selection, incoming pNext presence, and NULL-pNext fallback policy;
   * emits unambiguous markers that CI can verify in the final ELF.
 
 No LSFG-required Vulkan feature is fabricated.  Physical support remains the
-source of truth.
+source of truth.  LSFG keeps ownership of its swapchain/present hooks.
 """
 from __future__ import annotations
 
@@ -54,6 +57,8 @@ def main() -> None:
         'getenv("WRAPPER_BCN_GPU")',
         'wrapper_bcn_gpu_ready(struct wrapper_device *device)',
         'process_pnext_chain((VkBaseInStructure *)&wrapper_create_info, device->physical);',
+        '#define D(...) fprintf(stderr, "[WRAPPER_DIAG] " __VA_ARGS__)',
+        'const VkPhysicalDeviceProperties *p = &pdev->properties2.properties;',
     )
     for needle in required_upstream:
         if needle not in s:
@@ -87,6 +92,40 @@ exynostools_lsfg_active(void)
     old = """static bool\nwrapper_bcn_gpu_ready(struct wrapper_device *device)\n{\n   /* Default OFF. The GPU compute transcode is correct in isolation (its BC7\n"""
     new = """static bool\nwrapper_bcn_gpu_ready(struct wrapper_device *device)\n{\n   /* LSFG already runs a compute-heavy shared-device pipeline.  The wrapper's\n    * optional BCn GPU transcode is not needed for correctness (CPU fallback is\n    * authoritative) and must not inject compute work into LSFG presentation. */\n   if (exynostools_lsfg_active())\n      return false;\n\n   /* Default OFF. The GPU compute transcode is correct in isolation (its BC7\n"""
     s = replace_once(s, old, new, "BCn GPU LSFG guard")
+
+    diag_marker = r'''#define D(...) fprintf(stderr, "[WRAPPER_DIAG] " __VA_ARGS__)
+
+   const VkPhysicalDeviceProperties *p = &pdev->properties2.properties;
+'''
+    diag_block = r'''#define D(...) fprintf(stderr, "[WRAPPER_DIAG] " __VA_ARGS__)
+
+   /* ExynosTools adds diagnostic evidence only.  This mirrors get_vulkan_handle's
+    * backend condition and does not alter loader/device behavior. */
+   const char *exynostools_diag_process = getenv("LSFG_PROCESS");
+   const char *exynostools_diag_config = getenv("LSFG_CONFIG");
+   const char *exynostools_diag_adreno_path = getenv("ADRENOTOOLS_DRIVER_PATH");
+   const char *exynostools_diag_adreno_hooks = getenv("ADRENOTOOLS_HOOKS_PATH");
+   struct stat exynostools_diag_backend_stat;
+   const bool exynostools_diag_lsfg =
+      exynostools_diag_process && exynostools_diag_process[0] != '\0' &&
+      exynostools_diag_config && exynostools_diag_config[0] != '\0';
+   const bool exynostools_diag_custom_backend =
+      exynostools_diag_adreno_hooks && exynostools_diag_adreno_path &&
+      stat(exynostools_diag_adreno_path, &exynostools_diag_backend_stat) == 0;
+
+   D("--- ExynosTools LSFG integration ---\n");
+   D("  contract: GameNative-1.2.0@3491226f\n");
+   D("  active: %s\n", exynostools_diag_lsfg ? "yes" : "no");
+   D("  process: %s\n", exynostools_diag_process ? exynostools_diag_process : "<missing>");
+   D("  config: %s\n",
+     exynostools_diag_config && exynostools_diag_config[0] != '\0' ? "set" : "missing");
+   D("  backend: %s\n", exynostools_diag_custom_backend ? "adrenotools-custom" : "system-vulkan");
+   D("  incoming pNext: %s\n", ci && ci->pNext ? "present" : "none");
+   D("  NULL-pNext fallback: %s\n", exynostools_diag_lsfg ? "disabled" : "allowed");
+
+   const VkPhysicalDeviceProperties *p = &pdev->properties2.properties;
+'''
+    s = replace_once(s, diag_marker, diag_block, "WRAPPER_DIAG LSFG evidence block")
 
     device.write_text(s)
 
@@ -122,12 +161,16 @@ exynostools_lsfg_active(void)
         "ExynosTools LSFG: preserving shared-device feature chain",
         "ExynosTools LSFG: refusing NULL-pNext fallback",
         "if (exynostools_lsfg_active())\n      return false;",
+        "contract: GameNative-1.2.0@3491226f",
+        "backend: %s",
+        "incoming pNext: %s",
+        "NULL-pNext fallback: %s",
     )
     for needle in postconditions:
         if needle not in final:
             raise SystemExit(f"missing postcondition: {needle}")
 
-    print("ExynosTools LSFG shared-device hardening applied")
+    print("ExynosTools LSFG shared-device hardening + runtime diagnostics applied")
 
 
 if __name__ == "__main__":

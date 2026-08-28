@@ -2,7 +2,11 @@
 #include <vulkan/vk_layer.h>
 
 #include <dlfcn.h>
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -16,6 +20,24 @@
 
 namespace {
 
+constexpr const char* kLogTag = "ExynosToolsShim";
+
+void shim_log(const char* msg) {
+#ifdef __ANDROID__
+    __android_log_print(ANDROID_LOG_INFO, kLogTag, "%s", msg ? msg : "(null)");
+#else
+    (void)msg;
+#endif
+}
+
+void shim_log_error(const char* msg) {
+#ifdef __ANDROID__
+    __android_log_print(ANDROID_LOG_ERROR, kLogTag, "%s", msg ? msg : "(null)");
+#else
+    (void)msg;
+#endif
+}
+
 struct ShimRuntime {
     void* system_vulkan = nullptr;
     void* exynos_layer = nullptr;
@@ -23,6 +45,7 @@ struct ShimRuntime {
     PFN_vkGetInstanceProcAddr system_gipa = nullptr;
     PFN_vkGetDeviceProcAddr system_gdpa = nullptr;
     PFN_vkCreateInstance system_create_instance = nullptr;
+    PFN_vkCreateDevice system_create_device = nullptr;
     PFN_vkEnumerateInstanceVersion system_enumerate_instance_version = nullptr;
     PFN_vkEnumerateInstanceExtensionProperties system_enumerate_instance_extensions = nullptr;
     PFN_vkEnumerateInstanceLayerProperties system_enumerate_instance_layers = nullptr;
@@ -50,6 +73,78 @@ std::string join_driver_path(const char* directory, const char* filename) {
     return path;
 }
 
+const void* strip_synthetic_instance_link(const void* pNext) {
+    if (!pNext) return nullptr;
+    const auto* base = reinterpret_cast<const VkBaseInStructure*>(pNext);
+    if (base->sType == VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO) {
+        const auto* loader = reinterpret_cast<const VkLayerInstanceCreateInfo*>(pNext);
+        if (loader->function == VK_LAYER_LINK_INFO) {
+            return loader->pNext;
+        }
+    }
+    return pNext;
+}
+
+const void* strip_synthetic_device_link(const void* pNext) {
+    if (!pNext) return nullptr;
+    const auto* base = reinterpret_cast<const VkBaseInStructure*>(pNext);
+    if (base->sType == VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO) {
+        const auto* loader = reinterpret_cast<const VkLayerDeviceCreateInfo*>(pNext);
+        if (loader->function == VK_LAYER_LINK_INFO) {
+            return loader->pNext;
+        }
+    }
+    return pNext;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL downstream_CreateInstance(
+    const VkInstanceCreateInfo* pCreateInfo,
+    const VkAllocationCallbacks* pAllocator,
+    VkInstance* pInstance) {
+    if (!pCreateInfo || !g_runtime.system_create_instance) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    VkInstanceCreateInfo clean = *pCreateInfo;
+    clean.pNext = strip_synthetic_instance_link(pCreateInfo->pNext);
+    return g_runtime.system_create_instance(&clean, pAllocator, pInstance);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL downstream_CreateDevice(
+    VkPhysicalDevice physicalDevice,
+    const VkDeviceCreateInfo* pCreateInfo,
+    const VkAllocationCallbacks* pAllocator,
+    VkDevice* pDevice) {
+    if (!pCreateInfo || !g_runtime.system_create_device) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    VkDeviceCreateInfo clean = *pCreateInfo;
+    clean.pNext = strip_synthetic_device_link(pCreateInfo->pNext);
+    return g_runtime.system_create_device(physicalDevice, &clean, pAllocator, pDevice);
+}
+
+PFN_vkVoidFunction VKAPI_CALL downstream_gipa(VkInstance instance, const char* pName);
+PFN_vkVoidFunction VKAPI_CALL downstream_gdpa(VkDevice device, const char* pName);
+
+PFN_vkVoidFunction VKAPI_CALL downstream_gipa(VkInstance instance, const char* pName) {
+    if (!pName) return nullptr;
+    if (std::strcmp(pName, "vkGetInstanceProcAddr") == 0)
+        return reinterpret_cast<PFN_vkVoidFunction>(downstream_gipa);
+    if (std::strcmp(pName, "vkGetDeviceProcAddr") == 0)
+        return reinterpret_cast<PFN_vkVoidFunction>(downstream_gdpa);
+    if (std::strcmp(pName, "vkCreateInstance") == 0)
+        return reinterpret_cast<PFN_vkVoidFunction>(downstream_CreateInstance);
+    if (std::strcmp(pName, "vkCreateDevice") == 0)
+        return reinterpret_cast<PFN_vkVoidFunction>(downstream_CreateDevice);
+    return g_runtime.system_gipa ? g_runtime.system_gipa(instance, pName) : nullptr;
+}
+
+PFN_vkVoidFunction VKAPI_CALL downstream_gdpa(VkDevice device, const char* pName) {
+    if (!pName) return nullptr;
+    if (std::strcmp(pName, "vkGetDeviceProcAddr") == 0)
+        return reinterpret_cast<PFN_vkVoidFunction>(downstream_gdpa);
+    return g_runtime.system_gdpa ? g_runtime.system_gdpa(device, pName) : nullptr;
+}
+
 void initialize_runtime() {
 #if defined(__LP64__)
     constexpr const char* kSystemVulkan = "/system/lib64/libvulkan.so";
@@ -58,8 +153,10 @@ void initialize_runtime() {
 #endif
     constexpr const char* kLayerLibrary = "libVkLayer_VortekXclipse.so";
 
+    shim_log("initializing stock-Wrapper driver shim");
     g_runtime.system_vulkan = dlopen(kSystemVulkan, RTLD_NOW | RTLD_LOCAL);
     if (!g_runtime.system_vulkan) {
+        shim_log_error(dlerror());
         return;
     }
 
@@ -69,6 +166,8 @@ void initialize_runtime() {
         dlsym(g_runtime.system_vulkan, "vkGetDeviceProcAddr"));
     g_runtime.system_create_instance = reinterpret_cast<PFN_vkCreateInstance>(
         dlsym(g_runtime.system_vulkan, "vkCreateInstance"));
+    g_runtime.system_create_device = reinterpret_cast<PFN_vkCreateDevice>(
+        dlsym(g_runtime.system_vulkan, "vkCreateDevice"));
     g_runtime.system_enumerate_instance_version =
         reinterpret_cast<PFN_vkEnumerateInstanceVersion>(
             dlsym(g_runtime.system_vulkan, "vkEnumerateInstanceVersion"));
@@ -80,8 +179,9 @@ void initialize_runtime() {
             dlsym(g_runtime.system_vulkan, "vkEnumerateInstanceLayerProperties"));
 
     if (!g_runtime.system_gipa || !g_runtime.system_gdpa ||
-        !g_runtime.system_create_instance ||
+        !g_runtime.system_create_instance || !g_runtime.system_create_device ||
         !g_runtime.system_enumerate_instance_extensions) {
+        shim_log_error("system Vulkan exports incomplete");
         return;
     }
 
@@ -89,6 +189,7 @@ void initialize_runtime() {
         std::getenv("ADRENOTOOLS_DRIVER_PATH"), kLayerLibrary);
     g_runtime.exynos_layer = dlopen(layer_path.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (!g_runtime.exynos_layer) {
+        shim_log_error(dlerror());
         return;
     }
 
@@ -97,6 +198,7 @@ void initialize_runtime() {
     g_runtime.layer_gdpa = reinterpret_cast<PFN_vkGetDeviceProcAddr>(
         dlsym(g_runtime.exynos_layer, "vkGetDeviceProcAddr"));
     if (!g_runtime.layer_gipa || !g_runtime.layer_gdpa) {
+        shim_log_error("ExynosTools layer entrypoints incomplete");
         return;
     }
 
@@ -105,10 +207,12 @@ void initialize_runtime() {
     g_runtime.layer_create_device = reinterpret_cast<PFN_vkCreateDevice>(
         g_runtime.layer_gipa(VK_NULL_HANDLE, "vkCreateDevice"));
     if (!g_runtime.layer_create_instance || !g_runtime.layer_create_device) {
+        shim_log_error("ExynosTools layer create entrypoints unavailable");
         return;
     }
 
     g_runtime.ready = true;
+    shim_log("stock-Wrapper driver shim ready");
 }
 
 bool ensure_runtime() {
@@ -130,7 +234,7 @@ extern "C" EXYNOS_DRIVER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateInstance(
 
     VkLayerInstanceLink layer_link{};
     layer_link.pNext = nullptr;
-    layer_link.pfnNextGetInstanceProcAddr = g_runtime.system_gipa;
+    layer_link.pfnNextGetInstanceProcAddr = downstream_gipa;
     layer_link.pfnNextGetPhysicalDeviceProcAddr = nullptr;
 
     VkLayerInstanceCreateInfo loader_info{};
@@ -141,7 +245,11 @@ extern "C" EXYNOS_DRIVER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateInstance(
 
     VkInstanceCreateInfo create_info = *pCreateInfo;
     create_info.pNext = &loader_info;
-    return g_runtime.layer_create_instance(&create_info, pAllocator, pInstance);
+    VkResult result = g_runtime.layer_create_instance(&create_info, pAllocator, pInstance);
+#ifdef __ANDROID__
+    __android_log_print(ANDROID_LOG_INFO, kLogTag, "vkCreateInstance -> %d", result);
+#endif
+    return result;
 }
 
 extern "C" EXYNOS_DRIVER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
@@ -155,8 +263,8 @@ extern "C" EXYNOS_DRIVER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
 
     VkLayerDeviceLink layer_link{};
     layer_link.pNext = nullptr;
-    layer_link.pfnNextGetInstanceProcAddr = g_runtime.system_gipa;
-    layer_link.pfnNextGetDeviceProcAddr = g_runtime.system_gdpa;
+    layer_link.pfnNextGetInstanceProcAddr = downstream_gipa;
+    layer_link.pfnNextGetDeviceProcAddr = downstream_gdpa;
 
     VkLayerDeviceCreateInfo loader_info{};
     loader_info.sType = VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO;
@@ -166,8 +274,12 @@ extern "C" EXYNOS_DRIVER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
 
     VkDeviceCreateInfo create_info = *pCreateInfo;
     create_info.pNext = &loader_info;
-    return g_runtime.layer_create_device(
+    VkResult result = g_runtime.layer_create_device(
         physicalDevice, &create_info, pAllocator, pDevice);
+#ifdef __ANDROID__
+    __android_log_print(ANDROID_LOG_INFO, kLogTag, "vkCreateDevice -> %d", result);
+#endif
+    return result;
 }
 
 extern "C" EXYNOS_DRIVER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceVersion(
@@ -190,9 +302,6 @@ vkEnumerateInstanceExtensionProperties(
     if (!pPropertyCount || !ensure_runtime()) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-    // This library is being consumed as GameNative's custom Vulkan driver, not
-    // registered as another implicit layer. Forward driver/global extension
-    // discovery to Android's real Vulkan loader.
     return g_runtime.system_enumerate_instance_extensions(
         pLayerName, pPropertyCount, pProperties);
 }
@@ -214,30 +323,21 @@ vkEnumerateInstanceLayerProperties(
 namespace {
 
 PFN_vkVoidFunction shim_global_proc(const char* pName) {
-    if (!pName) {
-        return nullptr;
-    }
-    if (std::strcmp(pName, "vkGetInstanceProcAddr") == 0) {
+    if (!pName) return nullptr;
+    if (std::strcmp(pName, "vkGetInstanceProcAddr") == 0)
         return reinterpret_cast<PFN_vkVoidFunction>(vkGetInstanceProcAddr);
-    }
-    if (std::strcmp(pName, "vkGetDeviceProcAddr") == 0) {
+    if (std::strcmp(pName, "vkGetDeviceProcAddr") == 0)
         return reinterpret_cast<PFN_vkVoidFunction>(vkGetDeviceProcAddr);
-    }
-    if (std::strcmp(pName, "vkCreateInstance") == 0) {
+    if (std::strcmp(pName, "vkCreateInstance") == 0)
         return reinterpret_cast<PFN_vkVoidFunction>(vkCreateInstance);
-    }
-    if (std::strcmp(pName, "vkCreateDevice") == 0) {
+    if (std::strcmp(pName, "vkCreateDevice") == 0)
         return reinterpret_cast<PFN_vkVoidFunction>(vkCreateDevice);
-    }
-    if (std::strcmp(pName, "vkEnumerateInstanceVersion") == 0) {
+    if (std::strcmp(pName, "vkEnumerateInstanceVersion") == 0)
         return reinterpret_cast<PFN_vkVoidFunction>(vkEnumerateInstanceVersion);
-    }
-    if (std::strcmp(pName, "vkEnumerateInstanceExtensionProperties") == 0) {
+    if (std::strcmp(pName, "vkEnumerateInstanceExtensionProperties") == 0)
         return reinterpret_cast<PFN_vkVoidFunction>(vkEnumerateInstanceExtensionProperties);
-    }
-    if (std::strcmp(pName, "vkEnumerateInstanceLayerProperties") == 0) {
+    if (std::strcmp(pName, "vkEnumerateInstanceLayerProperties") == 0)
         return reinterpret_cast<PFN_vkVoidFunction>(vkEnumerateInstanceLayerProperties);
-    }
     return nullptr;
 }
 
@@ -251,10 +351,6 @@ vkGetInstanceProcAddr(VkInstance instance, const char* pName) {
     if (!ensure_runtime()) {
         return nullptr;
     }
-
-    // Once an instance exists, let the ExynosTools layer resolve its own
-    // interception table first. Unknown functions naturally fall through to
-    // the downstream Android Vulkan dispatch recorded by the layer.
     if (instance != VK_NULL_HANDLE) {
         if (PFN_vkVoidFunction proc = g_runtime.layer_gipa(instance, pName)) {
             return proc;
@@ -265,16 +361,30 @@ vkGetInstanceProcAddr(VkInstance instance, const char* pName) {
 
 extern "C" EXYNOS_DRIVER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
 vkGetDeviceProcAddr(VkDevice device, const char* pName) {
-    if (!pName || !ensure_runtime()) {
-        return nullptr;
-    }
-    if (std::strcmp(pName, "vkGetDeviceProcAddr") == 0) {
+    if (!pName || !ensure_runtime()) return nullptr;
+    if (std::strcmp(pName, "vkGetDeviceProcAddr") == 0)
         return reinterpret_cast<PFN_vkVoidFunction>(vkGetDeviceProcAddr);
-    }
     if (device != VK_NULL_HANDLE) {
         if (PFN_vkVoidFunction proc = g_runtime.layer_gdpa(device, pName)) {
             return proc;
         }
     }
     return g_runtime.system_gdpa(device, pName);
+}
+
+extern "C" EXYNOS_DRIVER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
+vk_icdGetInstanceProcAddr(VkInstance instance, const char* pName) {
+    return vkGetInstanceProcAddr(instance, pName);
+}
+
+extern "C" EXYNOS_DRIVER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
+vk_icdGetPhysicalDeviceProcAddr(VkInstance instance, const char* pName) {
+    return vkGetInstanceProcAddr(instance, pName);
+}
+
+extern "C" EXYNOS_DRIVER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL
+vk_icdNegotiateLoaderICDInterfaceVersion(uint32_t* pSupportedVersion) {
+    if (!pSupportedVersion) return VK_ERROR_INITIALIZATION_FAILED;
+    *pSupportedVersion = std::min(*pSupportedVersion, 5u);
+    return VK_SUCCESS;
 }

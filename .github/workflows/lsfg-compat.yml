@@ -41,14 +41,33 @@ jobs:
           #include <cstdlib>
           #include "layer_lsfg_compat.h"
           int main() {
-            unsetenv("LSFG_PROCESS"); unsetenv("LSFG_CONFIG");
+            unsetenv("LSFG_PROCESS");
+            unsetenv("LSFG_CONFIG");
+            unsetenv("VK_INSTANCE_LAYERS");
             if (exynos_lsfg_process_active()) return 1;
+
+            // Legacy GameNative activation remains supported.
             setenv("LSFG_PROCESS", "gamenative-lsfg", 1);
             if (exynos_lsfg_process_active()) return 2;
             setenv("LSFG_CONFIG", "/tmp/conf.toml", 1);
             if (!exynos_lsfg_process_active()) return 3;
+
+            // Current targeted GameNative intentionally omits LSFG_PROCESS and
+            // explicitly activates the Vulkan layer instead.
+            unsetenv("LSFG_PROCESS");
+            setenv(
+              "VK_INSTANCE_LAYERS",
+              "VK_LAYER_existing:VK_LAYER_LS_frame_generation",
+              1
+            );
+            if (!exynos_lsfg_process_active()) return 4;
+
+            // A config alone must not classify unrelated Vulkan processes as LSFG.
+            unsetenv("VK_INSTANCE_LAYERS");
+            if (exynos_lsfg_process_active()) return 5;
+
             const auto s = snapshot_lsfg_compat();
-            return (s.enabled && s.process_environment_present) ? 0 : 4;
+            return (!s.enabled && !s.process_environment_present) ? 0 : 6;
           }
           CPP
           c++ -std=c++17 -Wall -Wextra -Werror -Isrc/layer \

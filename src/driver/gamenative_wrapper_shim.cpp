@@ -122,6 +122,37 @@ void shim_log_result(const char* api, VkResult result) {
 #endif
 }
 
+bool is_passive_present_boundary_proc(const char* pName) {
+    if (!pName) return false;
+    return std::strcmp(pName, "vkCreateSwapchainKHR") == 0 ||
+           std::strcmp(pName, "vkDestroySwapchainKHR") == 0 ||
+           std::strcmp(pName, "vkGetSwapchainImagesKHR") == 0 ||
+           std::strcmp(pName, "vkAcquireNextImageKHR") == 0 ||
+           std::strcmp(pName, "vkAcquireNextImage2KHR") == 0 ||
+           std::strcmp(pName, "vkQueuePresentKHR") == 0;
+}
+
+void log_passive_present_boundary_resolution(
+    const char* pName,
+    const char* source,
+    bool resolved) {
+#ifdef __ANDROID__
+    if (is_passive_present_boundary_proc(pName)) {
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "Passive present-boundary GDPA resolve: %s source=%s resolved=%d (pointer returned unchanged)",
+            pName,
+            source ? source : "(unknown)",
+            resolved ? 1 : 0);
+    }
+#else
+    (void)pName;
+    (void)source;
+    (void)resolved;
+#endif
+}
+
 std::string join_path(const char* directory, const char* filename) {
     if (!directory || directory[0] == '\0') return filename;
     std::string path(directory);
@@ -520,11 +551,11 @@ bool load_exynos_layer() {
 }
 
 void initialize_runtime() {
-    shim_log("r6 initializing Android Vulkan HAL shim");
+    shim_log("r7 initializing Android Vulkan HAL shim");
     if (!open_real_samsung_hal()) return;
     if (!load_exynos_layer()) return;
     g_runtime.ready = true;
-    shim_log("r6 Android Vulkan HAL shim ready");
+    shim_log("r7 Android Vulkan HAL shim ready");
 }
 
 bool ensure_runtime() {
@@ -745,9 +776,16 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL shim_GetDeviceProcAddr(
         return reinterpret_cast<PFN_vkVoidFunction>(shim_GetDeviceProcAddr);
     }
     if (device != VK_NULL_HANDLE && g_runtime.layer_gdpa) {
-        if (PFN_vkVoidFunction proc = g_runtime.layer_gdpa(device, pName)) return proc;
+        PFN_vkVoidFunction proc = g_runtime.layer_gdpa(device, pName);
+        if (proc) {
+            log_passive_present_boundary_resolution(pName, "ExynosTools-layer", true);
+            return proc;
+        }
+        log_passive_present_boundary_resolution(pName, "ExynosTools-layer", false);
     }
-    return real_next_gdpa(device, pName);
+    PFN_vkVoidFunction proc = real_next_gdpa(device, pName);
+    log_passive_present_boundary_resolution(pName, "Samsung-HAL", proc != nullptr);
+    return proc;
 }
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL hal_GetInstanceProcAddr(

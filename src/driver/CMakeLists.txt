@@ -8,6 +8,8 @@ set(CMAKE_SKIP_RPATH ON)
 
 set(EXYNOS_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." CACHE PATH "ExynosTools-LSFG repository root")
 set(EXYNOS_VULKAN_HEADERS_PATH "" CACHE PATH "Vulkan-Headers repository root")
+set(EXYNOS_VULKAN_UTILITY_INCLUDE_DIR "" CACHE PATH "Vulkan-Utility-Libraries include directory")
+set(EXYNOS_VULKAN_UTILITY_SRC_DIR "" CACHE PATH "Vulkan-Utility-Libraries src/vulkan directory")
 
 set(_vulkan_candidates "")
 if(EXYNOS_VULKAN_HEADERS_PATH)
@@ -36,7 +38,25 @@ if(NOT EXYNOS_SHIM_VULKAN_INCLUDE_DIR)
     message(FATAL_ERROR "Vulkan headers with vk_layer.h are required")
 endif()
 
-add_library(vulkan_exynostools SHARED gamenative_wrapper_shim.cpp)
+if(NOT EXYNOS_VULKAN_UTILITY_INCLUDE_DIR AND EXISTS "${EXYNOS_ROOT}/external/Vulkan-Utility-Libraries/include")
+    set(EXYNOS_VULKAN_UTILITY_INCLUDE_DIR "${EXYNOS_ROOT}/external/Vulkan-Utility-Libraries/include")
+endif()
+if(NOT EXYNOS_VULKAN_UTILITY_SRC_DIR AND EXISTS "${EXYNOS_ROOT}/external/Vulkan-Utility-Libraries/src/vulkan")
+    set(EXYNOS_VULKAN_UTILITY_SRC_DIR "${EXYNOS_ROOT}/external/Vulkan-Utility-Libraries/src/vulkan")
+endif()
+if(NOT EXYNOS_VULKAN_UTILITY_INCLUDE_DIR OR NOT EXYNOS_VULKAN_UTILITY_SRC_DIR)
+    message(FATAL_ERROR "Vulkan-Utility-Libraries safe struct include/src directories are required")
+endif()
+
+add_library(vulkan_exynostools SHARED
+    gamenative_wrapper_shim.cpp
+    "${EXYNOS_VULKAN_UTILITY_SRC_DIR}/vk_safe_struct_core.cpp"
+    "${EXYNOS_VULKAN_UTILITY_SRC_DIR}/vk_safe_struct_ext.cpp"
+    "${EXYNOS_VULKAN_UTILITY_SRC_DIR}/vk_safe_struct_khr.cpp"
+    "${EXYNOS_VULKAN_UTILITY_SRC_DIR}/vk_safe_struct_manual.cpp"
+    "${EXYNOS_VULKAN_UTILITY_SRC_DIR}/vk_safe_struct_utils.cpp"
+    "${EXYNOS_VULKAN_UTILITY_SRC_DIR}/vk_safe_struct_vendor.cpp"
+)
 set_target_properties(vulkan_exynostools PROPERTIES
     OUTPUT_NAME "vulkan_exynostools"
     CXX_VISIBILITY_PRESET hidden
@@ -46,7 +66,10 @@ set_target_properties(vulkan_exynostools PROPERTIES
     INSTALL_RPATH ""
     SKIP_INSTALL_RPATH ON
 )
-target_include_directories(vulkan_exynostools PRIVATE "${EXYNOS_SHIM_VULKAN_INCLUDE_DIR}")
+target_include_directories(vulkan_exynostools PRIVATE
+    "${EXYNOS_SHIM_VULKAN_INCLUDE_DIR}"
+    "${EXYNOS_VULKAN_UTILITY_INCLUDE_DIR}"
+)
 
 if(ANDROID)
     target_link_libraries(vulkan_exynostools PRIVATE dl log)

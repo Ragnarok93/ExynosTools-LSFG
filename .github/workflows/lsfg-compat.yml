@@ -159,8 +159,21 @@ jobs:
           strings "$SHIM" | grep -q 'Samsung HAL still reports VK_ERROR_FEATURE_NOT_PRESENT'
           strings "$SHIM" | grep -q 'Samsung missing requested core feature'
           strings "$SHIM" | grep -q 'Samsung rejected device feature pNext'
-          strings "$SHIM" | grep -q 'r6 Android Vulkan HAL shim ready'
+          strings "$SHIM" | grep -q 'Passive present-boundary GDPA resolve'
+          strings "$SHIM" | grep -q 'vkCreateSwapchainKHR'
+          strings "$SHIM" | grep -q 'vkDestroySwapchainKHR'
+          strings "$SHIM" | grep -q 'vkGetSwapchainImagesKHR'
+          strings "$SHIM" | grep -q 'vkAcquireNextImageKHR'
+          strings "$SHIM" | grep -q 'vkAcquireNextImage2KHR'
+          strings "$SHIM" | grep -q 'vkQueuePresentKHR'
+          strings "$SHIM" | grep -q 'pointer returned unchanged'
+          strings "$SHIM" | grep -q 'r7 Android Vulkan HAL shim ready'
           strings "$SHIM" | grep -q 'ExynosToolsShim'
+          ! strings "$SHIM" | grep -q 'shim_CreateSwapchainKHR'
+          ! strings "$SHIM" | grep -q 'shim_DestroySwapchainKHR'
+          ! strings "$SHIM" | grep -q 'shim_AcquireNextImageKHR'
+          ! strings "$SHIM" | grep -q 'shim_AcquireNextImage2KHR'
+          ! strings "$SHIM" | grep -q 'shim_QueuePresentKHR'
           ! strings "$SHIM" | grep -q 'adrenotools_open_libvulkan'
           ! strings "$SHIM" | grep -q '/system/lib64/libvulkan.so'
 
@@ -172,21 +185,21 @@ jobs:
           cp build-gamenative-shim/libvulkan_exynostools.so stage-driver/
           cp build-ci/libVkLayer_VortekXclipse.so stage-driver/
           cp VkLayer_vortek_xclipse.json stage-driver/
-          (cd stage-driver && zip -9 ../dist/ExynosTools-LSFG-GameNative-1.2.0-r6.zip \
+          (cd stage-driver && zip -9 ../dist/ExynosTools-LSFG-GameNative-1.2.0-r7.zip \
             meta.json libvulkan_exynostools.so libVkLayer_VortekXclipse.so VkLayer_vortek_xclipse.json)
-          sha256sum dist/ExynosTools-LSFG-GameNative-1.2.0-r6.zip > dist/SHA256SUMS.txt
+          sha256sum dist/ExynosTools-LSFG-GameNative-1.2.0-r7.zip > dist/SHA256SUMS.txt
 
       - name: Verify packaged driver against untouched GameNative 1.2.0
         run: |
           python tests/gamenative_120_stock_wrapper_contract.py \
-            /tmp/GameNative dist/ExynosTools-LSFG-GameNative-1.2.0-r6.zip
-          ! unzip -l dist/ExynosTools-LSFG-GameNative-1.2.0-r6.zip | grep -q 'libvulkan_wrapper.so'
-          ! unzip -l dist/ExynosTools-LSFG-GameNative-1.2.0-r6.zip | grep -q 'profile.json'
+            /tmp/GameNative dist/ExynosTools-LSFG-GameNative-1.2.0-r7.zip
+          ! unzip -l dist/ExynosTools-LSFG-GameNative-1.2.0-r7.zip | grep -q 'libvulkan_wrapper.so'
+          ! unzip -l dist/ExynosTools-LSFG-GameNative-1.2.0-r7.zip | grep -q 'profile.json'
 
       - name: Upload GameNative custom-driver artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ExynosTools-LSFG-GameNative-1.2.0-r6-${{ github.sha }}
+          name: ExynosTools-LSFG-GameNative-1.2.0-r7-${{ github.sha }}
           path: dist/*
           if-no-files-found: error
           retention-days: 30

@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "name": "Vortek Xclipse Native",
-  "description": "Samsung Xclipse driver package with in-process BCn compatibility wrapper. Set VK_INSTANCE_LAYERS=VK_LAYER_VORTEK_XCLIPSE.",
+  "name": "ExynosTools Xclipse LSFG r7",
+  "description": "Samsung Xclipse compatibility driver for stock GameNative 1.2.0 wrappers. r7 retains the physically validated r6 virtual-BC device-feature bridge and adds passive GDPA diagnostics for swapchain/acquire/present entrypoints. Presentation pointers are observed and returned unchanged; stock GameNative and its LSFG layer retain full swapchain and vkQueuePresentKHR ownership.",
   "author": "Vortek / ExynosTools",
-  "packageVersion": "0.1-native-prototype",
+  "packageVersion": "0.7.0-gamenative-1.2.0",
   "vendor": "SAMSUNG",
-  "driverVersion": "Vulkan 1.4.304",
+  "driverVersion": "Samsung hwvulkan HAL + virtual BC bridge + passive present-boundary diagnostics r7",
   "minApi": 35,
-  "libraryName": "vulkan.samsung.so",
+  "libraryName": "libvulkan_exynostools.so",
   "layerLibrary": "libVkLayer_VortekXclipse.so",
   "layerName": "VK_LAYER_VORTEK_XCLIPSE"
 }

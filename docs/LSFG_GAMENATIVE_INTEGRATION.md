@@ -1,96 +1,143 @@
-# GameNative LSFG Integration Boundary
+# GameNative 1.2.0 LSFG Integration Boundary
 
-## Compatibility target: stock GameNative 1.2.0
+## Hard compatibility target
 
-The compatibility target for ExynosTools-LSFG is the **unmodified GameNative app v1.2.0 codebase** at commit `3491226faedb7222a5f8b7248c0247957a060836`.
+ExynosTools-LSFG targets the **unmodified stock GameNative v1.2.0 codebase** at commit `3491226faedb7222a5f8b7248c0247957a060836`.
 
-That GameNative 1.2.0 codebase downloads/installs an LSFG runtime identified by its manager as `v1.3.3-android-arm64-v8a`. The runtime version string must not be confused with the GameNative app version: ExynosTools must continue to install and operate through the Wrapper interface already implemented by stock GameNative 1.2.0.
+GameNative's existing Wrapper components, Contents Manager behavior, Bionic launcher, LSFG manager, `liblsfg-vk-layer.so`, manifests, configuration flow, and application functionality are compatibility constraints. They are not implementation targets and must not be patched or replaced.
 
-GameNative 1.2.0 arms its LSFG Vulkan layer with `LSFG_PROCESS=gamenative-lsfg` and a non-empty `LSFG_CONFIG`. ExynosTools treats that environment pair as the authoritative process marker. The older `lsfg-vk-base` application/engine-name classification is retained only for compatibility with older LSFG builds.
+GameNative 1.2.0 bundles an LSFG runtime identified by `LsfgVkManager` as `v1.3.3-android-arm64-v8a`. The app version and bundled LSFG runtime version are separate facts.
 
-The ExynosTools WCP replaces **only GameNative's Wrapper Vulkan component**. Stock GameNative remains responsible for downloading/configuring `liblsfg-vk-layer.so`, installing `VkLayer_LS_frame_generation.json`, setting `VK_LAYER_PATH`, and launching the Bionic process with the LSFG environment.
+## Correct load chain
 
-## Bundled LSFG runtime architecture
+The intended Vulkan chain is:
 
-The LSFG runtime bundled by stock GameNative 1.2.0 uses a **single-device frame-generation** path. It does not require ExynosTools to create an independent frame-generation Vulkan device, and ExynosTools must not take ownership of LSFG swapchain/present objects.
+```text
+Game / DXVK / vkd3d-proton
+        ↓
+GameNative's stock VK_LAYER_LS_frame_generation
+        ↓
+GameNative's stock Wrapper component
+        ↓
+libvulkan_exynostools.so        (custom driver selected through AdrenoTools)
+        ↓
+libVkLayer_VortekXclipse.so     (ExynosTools compatibility engine, hosted by the shim)
+        ↓
+/system/lib64/libvulkan.so
+        ↓
+Samsung/Xclipse vendor ICD
+```
 
-The LSFG layer:
+The important distinction is that **ExynosTools is the custom driver underneath the existing Wrapper**. It is not a replacement Wrapper WCP.
 
-1. hooks the game's Vulkan instance/device and swapchain;
-2. preserves/enables the supported storage-image, FP16 and Vulkan-memory-model features it needs in the game's `VkDeviceCreateInfo`;
-3. creates RGBA working images on the game's existing `VkDevice` with storage, sampled, transfer-source and transfer-destination usage;
-4. initializes frame generation against the game's instance, physical device, device, queue family and queue;
-5. creates the frame-generation context from those same-device images;
-6. runs frame generation on the shared device/queue and owns the presentation interception path.
+Stock GameNative's `AdrenotoolsManager` already provides the required driver-injection contract. For a selected custom driver it reads `meta.json` and sets:
 
-The runtime also checks external-memory/external-semaphore capabilities during setup, so ExynosTools must expose the real Xclipse extension contract unchanged.
+- `ADRENOTOOLS_DRIVER_PATH`
+- `ADRENOTOOLS_HOOKS_PATH`
+- `ADRENOTOOLS_DRIVER_NAME`
 
-## ExynosTools policy for LSFG
+The selected stock Wrapper then loads the named custom Vulkan library. ExynosTools therefore packages `libvulkan_exynostools.so` as `libraryName` in `meta.json`.
 
-ExynosTools must remain transparent to LSFG's device requirements while retaining BCn virtualization for the game itself.
+## Why a driver shim is required
 
-- Never fabricate an LSFG-required feature. Forward the Samsung/Xclipse feature result and preserve GameNative/LSFG feature-enable pNext structures.
-- Never hide Xclipse extensions required by GameNative. Xclipse devices are excluded from the non-Xclipse extension-hide quirks.
-- Do not inject optional descriptor-buffer behavior into an LSFG-marked process. GameNative/LSFG owns the shared-device feature contract.
-- Skip eager BCn compute-runtime prewarm when `LSFG_PROCESS` + `LSFG_CONFIG` identify the shared LSFG/game device. BCn remains lazy-enabled if the game later uses a virtual BC format.
-- Do not virtualize externally-backed BCn images in an LSFG process. External-memory image contracts must stay native.
-- Ordinary LSFG working images (`R16G16B16A16_SFLOAT` or `R8G8B8A8_UNORM`) are not BC formats and therefore naturally bypass BCn virtualization.
-- Copy/blit interception may route through ExynosTools' special path only when tracked images actually involve a virtual BCn image.
-- Do not implement or replace `vkCreateSwapchainKHR` / `vkQueuePresentKHR` ownership for LSFG. The GameNative-provided LSFG layer owns those hooks.
+The original prototype ZIP set `libraryName=vulkan.samsung.so` but did not contain `vulkan.samsung.so`. GameNative's stock AdrenoTools path therefore had no loadable library corresponding to the metadata. Merely placing `libVkLayer_VortekXclipse.so` and its manifest in the custom-driver directory also does not make that directory part of GameNative's Vulkan layer search path.
 
-## Wrapper WCP boundary
+`libvulkan_exynostools.so` closes that gap without changing GameNative:
 
-Stock GameNative 1.2.0 already supports a custom `Wrapper` content profile. The ExynosTools WCP intentionally stays minimal:
+1. GameNative's existing Wrapper loads the shim through its normal AdrenoTools path.
+2. The shim opens Android's system Vulkan loader at `/system/lib64/libvulkan.so` (or `/system/lib/libvulkan.so` on 32-bit builds), matching the stock Wrapper's system-driver fallback model.
+3. The shim loads the packaged `libVkLayer_VortekXclipse.so` from `ADRENOTOOLS_DRIVER_PATH`.
+4. It supplies the standard Vulkan loader-link structures expected by the ExynosTools layer for `vkCreateInstance` and `vkCreateDevice`.
+5. The existing ExynosTools layer retains its normal instance/device dispatch maps and compatibility logic while the real downstream implementation remains Samsung Vulkan.
 
-- `libvulkan_wrapper.so`
-- `libadrenotools.so`
-- `wrapper_icd.aarch64.json`
-- `profile.json`
+No proprietary Samsung driver binary is redistributed or renamed.
 
-The wrapper must preserve the LSFG feature pNext chain during `vkCreateDevice`. If an optional compatibility retry would require replacing that chain with `pNext = NULL`, it must fail rather than silently stripping LSFG-required features. Optional ExynosTools GPU BCn compute-transcode initialization is also disabled in an LSFG-marked process so ExynosTools does not inject unrelated compute work into LSFG's shared presentation device; CPU BCn fallback remains available.
+## LSFG ownership
 
-## Xclipse 940 evidence already captured
+GameNative's stock LSFG layer remains solely responsible for frame generation and presentation interception.
 
-The repository's device-validation history recorded Samsung Xclipse 940 / Vulkan 1.3.279 exposing the capabilities used by the bundled LSFG path:
+ExynosTools must not replace or take ownership of:
 
-- `shaderStorageImageExtendedFormats = YES`
-- `shaderStorageImageReadWithoutFormat = YES`
-- `shaderStorageImageWriteWithoutFormat = YES`
-- `shaderInt16 = YES`
-- Vulkan 1.2/1.3 support including timeline semaphore and synchronization2
-- `VK_KHR_shader_float16_int8`
-- `VK_KHR_vulkan_memory_model`
-- `VK_KHR_external_memory` and `VK_KHR_external_memory_fd`
-- `VK_KHR_external_semaphore` and `VK_KHR_external_semaphore_fd`
-- OPAQUE_FD memory import/export support
-- OPAQUE_FD and SYNC_FD semaphore import/export support
+- `vkCreateSwapchainKHR`
+- `vkDestroySwapchainKHR`
+- `vkAcquireNextImageKHR` / `vkAcquireNextImage2KHR`
+- `vkQueuePresentKHR`
+- LSFG frame-generation contexts or working images
+- GameNative's `Lossless.dll`, `conf.toml`, manifest, or LSFG lifecycle
 
-Those observations establish that the raw Xclipse 940 driver is not missing the fundamental Vulkan capabilities required by the bundled LSFG path. They do not replace an end-to-end GameNative presentation test.
+GameNative 1.2.0 arms LSFG with `LSFG_PROCESS=gamenative-lsfg` and a non-empty `LSFG_CONFIG`. ExynosTools uses that pair only as a compatibility/coexistence signal.
 
-## Validation gates
+## ExynosTools LSFG coexistence policy
 
-`tests/lsfg_compat_contract.py` validates the ExynosTools source contract. With `--gamenative-root`, it additionally requires the GameNative tree to resolve to the exact stock v1.2.0 SHA and checks the LSFG manager/launcher contract from that pinned tree. `--lsfg-root` remains available only as an explicit developer check against a separately supplied LSFG source tree; it is not the authoritative GameNative 1.2.0 compatibility anchor.
+When the stock GameNative LSFG environment is active:
 
-`.github/workflows/lsfg-compat.yml` fetches the exact GameNative v1.2.0 commit directly and refuses revision drift. It deliberately does not clone mutable GameNative `main` or a mutable LSFG `release` branch for the stock-1.2.0 compatibility decision.
+- preserve the real Xclipse feature/extension contract; never fabricate an LSFG-required capability;
+- skip optional descriptor-buffer injection that could alter the shared-device feature setup;
+- skip eager BCn compute-runtime prewarm on the LSFG shared-device path;
+- preserve external-memory/AHardwareBuffer contracts and bypass BCn virtualization for externally-backed BCn images;
+- keep LSFG's RGBA8/RGBA16F working images outside the BCn virtualization path;
+- keep ordinary BCn virtualization available to the game when it actually uses unsupported BC formats;
+- preserve feature and synchronization pNext chains rather than replacing them.
 
-`tests/gamenative_120_wcp_contract.py` validates the generated WCP against the same exact GameNative source revision and verifies the stock Wrapper trust/application contract plus stock LSFG ownership.
+The current ExynosTools compatibility layer intentionally does not hook the LSFG swapchain/present path.
 
-`tests/termux_lsfg/run.sh` always validates the LSFG environment state machine and source contract. Set `GAMENATIVE_120_ROOT` to a local checkout of the exact stock GameNative 1.2.0 revision to enable the pinned app-source check. Set `GAMENATIVE_120_WCP` as well to validate a built ExynosTools WCP against that checkout.
+## Stock GameNative 1.2.0 contracts used
 
-The Samsung vendor ICD itself must be exercised from an Android application process because Android linker namespaces can prevent a raw Termux process from loading vendor Vulkan dependencies. `tests/android_native_probe` remains the native-Android ICD/layer validation path.
+The compatibility tests pin and verify all of these behaviors in the exact 1.2.0 source tree:
+
+- stock Wrapper components remain present in `graphics_driver_download.json`, including `wrapper-gamenative`, `wrapper-v2`, and `wrapper-legacy`;
+- `XServerScreen` retains normal Wrapper selection and invokes `AdrenotoolsManager.setDriverById` for a non-System custom driver;
+- `AdrenotoolsManager` reads a custom driver's `libraryName` and publishes the existing `ADRENOTOOLS_*` environment contract;
+- the Bionic launcher propagates the container environment without ExynosTools-specific GameNative changes;
+- `LsfgVkManager.applyLaunchEnv` remains GameNative-owned and adds its stock LSFG layer/configuration environment;
+- GameNative continues to install and own `liblsfg-vk-layer.so` and `VkLayer_LS_frame_generation.json`.
+
+## Package contract
+
+The GameNative-installable ExynosTools artifact is a normal root-flat custom-driver ZIP, not a WCP. Required runtime members are:
+
+```text
+meta.json
+libvulkan_exynostools.so
+libVkLayer_VortekXclipse.so
+```
+
+`VkLayer_vortek_xclipse.json` may also be included for standalone/debug layer use, but the GameNative driver path does not depend on Vulkan implicit-layer discovery for ExynosTools itself: the shim hosts the layer directly.
+
+The package must not contain:
+
+```text
+profile.json
+libvulkan_wrapper.so
+wrapper_icd.aarch64.json
+```
+
+Those belong to GameNative's Wrapper layer and are deliberately untouched.
+
+## Validation
+
+`tests/gamenative_120_stock_wrapper_contract.py` validates the exact stock GameNative 1.2.0 Wrapper/AdrenoTools/LSFG source contract and optionally validates a built custom-driver ZIP.
+
+`tests/lsfg_compat_contract.py` validates the ExynosTools LSFG coexistence rules and the pinned stock GameNative LSFG manager contract.
+
+`tests/termux_lsfg/run.sh` can additionally validate a local exact GameNative 1.2.0 checkout with `GAMENATIVE_120_ROOT` and a built custom-driver ZIP with `GAMENATIVE_120_DRIVER_ZIP`.
+
+`.github/workflows/lsfg-compat.yml` builds both ARM64 runtime libraries, packages the custom driver, and validates it against the untouched GameNative 1.2.0 source tree.
+
+The final proof still requires a physical Xclipse device because Android linker namespaces and the Samsung vendor ICD cannot be completely represented by a raw Termux process.
 
 ## End-to-end acceptance criteria
 
-A device run is considered LSFG-compatible only when all of these are observed on an Xclipse device:
+A stock GameNative 1.2.0 device run is accepted only when:
 
-1. baseline Samsung Vulkan instance/device creation succeeds;
-2. the ExynosTools Wrapper loads the Samsung Vulkan implementation without self-recursion;
-3. stock GameNative 1.2.0 discovers and loads `VK_LAYER_LS_frame_generation` while the ExynosTools Wrapper remains the selected Vulkan component;
-4. `LSFG_PROCESS` and `LSFG_CONFIG` are present in the game process;
-5. LSFG creates its shared-device frame-generation context without `VK_ERROR_FEATURE_NOT_PRESENT`, `VK_ERROR_EXTENSION_NOT_PRESENT`, `VK_ERROR_DEVICE_LOST`, or a watchdog stall;
-6. generated-frame presentation increases measured output FPS above base FPS for multiplier > 1;
-7. frame-generation output remains visually coherent through motion and scene changes;
-8. BCn titles still use ExynosTools virtualization when required and LSFG color working images never enter the BCn route;
-9. disabling LSFG restores normal game presentation without requiring a different ExynosTools package.
-
-Passing CI proves pinned source/build compatibility. Passing the Android-native probe proves Samsung ICD/layer execution. Only a stock GameNative 1.2.0 device run proves end-to-end frame generation.
+1. an unchanged stock Wrapper is selected;
+2. the ExynosTools custom driver is selected through GameNative's existing driver-version/AdrenoTools path;
+3. `libvulkan_exynostools.so` loads `libVkLayer_VortekXclipse.so` and reaches Android system Vulkan without recursion;
+4. the resulting physical device is the Samsung/Xclipse vendor implementation;
+5. GameNative's stock `VK_LAYER_LS_frame_generation` loads normally and `LSFG_PROCESS` + `LSFG_CONFIG` are present;
+6. device creation succeeds with LSFG's required feature chain intact;
+7. LSFG creates and uses its frame-generation context without device loss or a watchdog stall;
+8. measured presented FPS rises above base rendered FPS for a multiplier greater than 1;
+9. generated frames remain visually coherent through motion and scene changes;
+10. BCn-dependent games still use ExynosTools compatibility paths where needed;
+11. disabling LSFG restores normal presentation while leaving the same stock Wrapper and ExynosTools custom driver selected.

@@ -42,10 +42,11 @@ def validate_repo(repo: Path) -> None:
     assert meta["libraryName"] == EXPECTED_DRIVER_LIBRARY, meta
     assert meta["layerLibrary"] == EXPECTED_LAYER_LIBRARY, meta
     assert meta["layerName"] == "VK_LAYER_VORTEK_XCLIPSE", meta
-    assert meta["name"].endswith("r5"), meta
+    assert meta["name"].endswith("r6"), meta
     print("PASS: ExynosTools GameNative driver metadata")
 
     shim = read(repo, "src/driver/gamenative_wrapper_shim.cpp")
+    shim_cmake = read(repo, "src/driver/CMakeLists.txt")
     dispatch_key = read(repo, "src/layer/layer_dispatch_key.h")
     require(shim, '"ADRENOTOOLS_DRIVER_PATH"', "stock Wrapper driver-directory input")
     require(shim, '"libVkLayer_VortekXclipse.so"', "ExynosTools compatibility layer host")
@@ -95,10 +96,30 @@ def validate_repo(repo: Path) -> None:
     require(shim, "layer_link.pfnNextGetInstanceProcAddr = real_next_gipa", "layer chains to Samsung GIPA")
     require(shim, "layer_link.pfnNextGetDeviceProcAddr = real_next_gdpa", "layer chains to Samsung GDPA")
 
+    # r5 device logs proved DXVK reaches Samsung vkCreateDevice but receives
+    # VK_ERROR_FEATURE_NOT_PRESENT while the Zink/LSFG path can create a device.
+    # ExynosTools intentionally virtualizes textureCompressionBC, so r6 must
+    # consume only that virtual feature at the real Samsung HAL boundary while
+    # leaving all other application feature requests intact.
+    require(shim, "vku::safe_VkDeviceCreateInfo", "pNext-safe device-create clone")
+    require(shim_cmake, "Vulkan-Utility-Libraries", "shim safe-struct dependency")
+    require(shim, "query_samsung_core_features", "native Samsung core-feature query")
+    require(shim, "query_layer_core_features", "ExynosTools advertised core-feature query")
+    require(shim, "consume_virtual_bc_device_feature", "virtual BC device-feature consumer")
+    require(shim, "advertised_features.textureCompressionBC == VK_TRUE", "BC virtualization advertised-state gate")
+    require(shim, "samsung_features.textureCompressionBC == VK_FALSE", "BC native-unsupported gate")
+    require(shim, "features->textureCompressionBC = VK_FALSE", "legacy BC request consumption")
+    require(shim, "features2->features.textureCompressionBC = VK_FALSE", "features2 BC request consumption")
+    require(shim, "Consumed virtual textureCompressionBC device feature before Samsung vkCreateDevice", "virtual BC consumption diagnostic")
+    require(shim, "Samsung HAL still reports VK_ERROR_FEATURE_NOT_PRESENT", "post-consumption failure diagnostic")
+    require(shim, "Samsung missing requested core feature", "remaining core-feature diagnostic")
+    require(shim, "Samsung rejected device feature pNext", "remaining pNext-feature diagnostic")
+
     require(shim, '"ExynosToolsShim"', "runtime diagnostic log tag")
     require(shim, "Samsung Vulkan HAL opened", "real HAL open diagnostic")
     require(shim, "HAL vkCreateInstance", "HAL instance diagnostic")
     require(shim, "HAL vkCreateDevice", "HAL device diagnostic")
+    require(shim, "r6 initializing Android Vulkan HAL shim", "r6 runtime marker")
 
     assert not (repo / "ci/patch_gamenative_wrapper_lsfg.py").exists(), (
         "GameNative wrapper patcher must not exist"
@@ -163,7 +184,7 @@ def validate_zip(path: Path) -> None:
         assert "libvulkan_wrapper.so" not in names, "driver ZIP must not replace stock Wrapper"
         meta = json.loads(zf.read("meta.json"))
         assert meta["libraryName"] == EXPECTED_DRIVER_LIBRARY
-        assert meta["name"].endswith("r5")
+        assert meta["name"].endswith("r6")
         for name in required:
             assert zf.getinfo(name).file_size > 0, f"empty driver member: {name}"
     print("PASS: GameNative custom-driver ZIP contract")

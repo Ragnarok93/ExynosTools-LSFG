@@ -42,7 +42,7 @@ def validate_repo(repo: Path) -> None:
     assert meta["libraryName"] == EXPECTED_DRIVER_LIBRARY, meta
     assert meta["layerLibrary"] == EXPECTED_LAYER_LIBRARY, meta
     assert meta["layerName"] == "VK_LAYER_VORTEK_XCLIPSE", meta
-    assert meta["name"].endswith("r6"), meta
+    assert meta["name"].endswith("r7"), meta
     print("PASS: ExynosTools GameNative driver metadata")
 
     shim = read(repo, "src/driver/gamenative_wrapper_shim.cpp")
@@ -96,11 +96,8 @@ def validate_repo(repo: Path) -> None:
     require(shim, "layer_link.pfnNextGetInstanceProcAddr = real_next_gipa", "layer chains to Samsung GIPA")
     require(shim, "layer_link.pfnNextGetDeviceProcAddr = real_next_gdpa", "layer chains to Samsung GDPA")
 
-    # r5 device logs proved DXVK reaches Samsung vkCreateDevice but receives
-    # VK_ERROR_FEATURE_NOT_PRESENT while the Zink/LSFG path can create a device.
-    # ExynosTools intentionally virtualizes textureCompressionBC, so r6 must
-    # consume only that virtual feature at the real Samsung HAL boundary while
-    # leaving all other application feature requests intact.
+    # r6 was physically validated: the DXVK device request succeeds after the
+    # layer's virtual BC capability is consumed only at Samsung's native boundary.
     require(shim, "vku::safe_VkDeviceCreateInfo", "pNext-safe device-create clone")
     require(shim_cmake, "Vulkan-Utility-Libraries", "shim safe-struct dependency")
     require(shim, "query_samsung_core_features", "native Samsung core-feature query")
@@ -115,11 +112,29 @@ def validate_repo(repo: Path) -> None:
     require(shim, "Samsung missing requested core feature", "remaining core-feature diagnostic")
     require(shim, "Samsung rejected device feature pNext", "remaining pNext-feature diagnostic")
 
+    # r7 observes the next physical milestone without taking ownership from
+    # stock GameNative/LSFG. The GDPA pointer is logged and returned unchanged.
+    require(shim, "is_passive_present_boundary_proc", "passive present-boundary selector")
+    require(shim, "Passive present-boundary GDPA resolve", "passive present-boundary diagnostic")
+    require(shim, "pointer returned unchanged", "unchanged present pointer contract")
+    require(shim, '"vkCreateSwapchainKHR"', "swapchain-create resolution probe")
+    require(shim, '"vkDestroySwapchainKHR"', "swapchain-destroy resolution probe")
+    require(shim, '"vkGetSwapchainImagesKHR"', "swapchain-image resolution probe")
+    require(shim, '"vkAcquireNextImageKHR"', "acquire-next-image resolution probe")
+    require(shim, '"vkAcquireNextImage2KHR"', "acquire-next-image2 resolution probe")
+    require(shim, '"vkQueuePresentKHR"', "queue-present resolution probe")
+    require(shim, 'source=%s resolved=%d (pointer returned unchanged)', "passive GDPA-only behavior marker")
+    forbid(shim, "shim_CreateSwapchainKHR", "no shim swapchain creation ownership")
+    forbid(shim, "shim_DestroySwapchainKHR", "no shim swapchain destruction ownership")
+    forbid(shim, "shim_AcquireNextImageKHR", "no shim acquire ownership")
+    forbid(shim, "shim_AcquireNextImage2KHR", "no shim acquire2 ownership")
+    forbid(shim, "shim_QueuePresentKHR", "no shim presentation ownership")
+
     require(shim, '"ExynosToolsShim"', "runtime diagnostic log tag")
     require(shim, "Samsung Vulkan HAL opened", "real HAL open diagnostic")
     require(shim, "HAL vkCreateInstance", "HAL instance diagnostic")
     require(shim, "HAL vkCreateDevice", "HAL device diagnostic")
-    require(shim, "r6 initializing Android Vulkan HAL shim", "r6 runtime marker")
+    require(shim, "r7 initializing Android Vulkan HAL shim", "r7 runtime marker")
 
     assert not (repo / "ci/patch_gamenative_wrapper_lsfg.py").exists(), (
         "GameNative wrapper patcher must not exist"
@@ -164,6 +179,9 @@ def validate_gamenative(root: Path) -> None:
     require(lsfg, 'ENV_CONFIG = "LSFG_CONFIG"', "stock LSFG config marker")
     require(lsfg, 'ENV_PROCESS = "LSFG_PROCESS"', "stock LSFG process marker")
     require(lsfg, 'RUNTIME_VERSION = "v1.3.3-android-arm64-v8a"', "stock bundled LSFG runtime")
+    require(lsfg, "vkCreateSwapchainKHR", "stock LSFG owns swapchain interception")
+    require(lsfg, "vkQueuePresentKHR", "stock LSFG owns presentation interception")
+    require(lsfg, 'STATS_RELATIVE_PATH = ".config/lsfg-vk/stats.txt"', "stock LSFG measured-fps path")
 
     assert launcher.index("envVars.putAll(this.envVars)") < launcher.index(
         "LsfgVkManager.applyLaunchEnv"
@@ -184,7 +202,7 @@ def validate_zip(path: Path) -> None:
         assert "libvulkan_wrapper.so" not in names, "driver ZIP must not replace stock Wrapper"
         meta = json.loads(zf.read("meta.json"))
         assert meta["libraryName"] == EXPECTED_DRIVER_LIBRARY
-        assert meta["name"].endswith("r6")
+        assert meta["name"].endswith("r7")
         for name in required:
             assert zf.getinfo(name).file_size > 0, f"empty driver member: {name}"
     print("PASS: GameNative custom-driver ZIP contract")

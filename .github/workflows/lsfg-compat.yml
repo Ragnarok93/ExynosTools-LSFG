@@ -40,15 +40,45 @@ jobs:
           cat >/tmp/lsfg_compat_test.cpp <<'CPP'
           #include <cstdlib>
           #include "layer_lsfg_compat.h"
+
+          static void clear_lsfg_env() {
+            unsetenv("LSFG_PROCESS");
+            unsetenv("LSFG_CONFIG");
+            unsetenv("VK_INSTANCE_LAYERS");
+            unsetenv("VK_LOADER_LAYERS_ENABLE");
+          }
+
           int main() {
-            unsetenv("LSFG_PROCESS"); unsetenv("LSFG_CONFIG");
+            clear_lsfg_env();
             if (exynos_lsfg_process_active()) return 1;
-            setenv("LSFG_PROCESS", "gamenative-lsfg", 1);
-            if (exynos_lsfg_process_active()) return 2;
+
+            // Current GameNative targeted mode intentionally does not export
+            // LSFG_PROCESS.  The wrapper must recognize the explicitly enabled
+            // LSFG Vulkan layer plus LSFG_CONFIG as the authoritative marker.
             setenv("LSFG_CONFIG", "/tmp/conf.toml", 1);
-            if (!exynos_lsfg_process_active()) return 3;
-            const auto s = snapshot_lsfg_compat();
-            return (s.enabled && s.process_environment_present) ? 0 : 4;
+            setenv("VK_INSTANCE_LAYERS", "VK_LAYER_LS_frame_generation", 1);
+            if (!exynos_lsfg_process_active()) return 2;
+            auto s = snapshot_lsfg_compat();
+            if (!s.enabled || !s.process_environment_present) return 3;
+
+            clear_lsfg_env();
+            setenv("LSFG_CONFIG", "/tmp/conf.toml", 1);
+            setenv("VK_LOADER_LAYERS_ENABLE", "VK_LAYER_OTHER:VK_LAYER_LS_frame_generation", 1);
+            if (!exynos_lsfg_process_active()) return 4;
+
+            // A config alone or an unrelated layer must not create a false positive.
+            clear_lsfg_env();
+            setenv("LSFG_CONFIG", "/tmp/conf.toml", 1);
+            if (exynos_lsfg_process_active()) return 5;
+            setenv("VK_INSTANCE_LAYERS", "VK_LAYER_KHRONOS_validation", 1);
+            if (exynos_lsfg_process_active()) return 6;
+
+            // Keep legacy GameNative launches working during transition.
+            clear_lsfg_env();
+            setenv("LSFG_PROCESS", "gamenative-lsfg", 1);
+            setenv("LSFG_CONFIG", "/tmp/conf.toml", 1);
+            if (!exynos_lsfg_process_active()) return 7;
+            return 0;
           }
           CPP
           c++ -std=c++17 -Wall -Wextra -Werror -Isrc/layer \

@@ -15,6 +15,11 @@ For an LSFG process this patch therefore:
   * forces the optional GPU BCn transcode path off even if globally requested;
   * emits unambiguous markers that CI can verify in the final ELF.
 
+Current GameNative targeted activation intentionally omits LSFG_PROCESS and
+instead supplies LSFG_CONFIG while explicitly enabling
+VK_LAYER_LS_frame_generation.  The injected wrapper detector accepts that
+contract and retains LSFG_PROCESS + LSFG_CONFIG only as a legacy fallback.
+
 No LSFG-required Vulkan feature is fabricated.  Physical support remains the
 source of truth.
 """
@@ -62,11 +67,44 @@ def main() -> None:
     helper_marker = "\nVKAPI_ATTR VkResult VKAPI_CALL\nwrapper_CreateDevice(VkPhysicalDevice physicalDevice,\n"
     helper = r'''
 static bool
+exynostools_env_list_contains(const char *name, const char *expected)
+{
+   const char *raw = getenv(name);
+   if (!raw || !raw[0])
+      return false;
+
+   const size_t expected_len = strlen(expected);
+   const char *token = raw;
+   while (*token) {
+      while (*token == ':' || *token == ';' || *token == ',' ||
+             *token == ' ' || *token == '\t')
+         token++;
+      const char *end = token;
+      while (*end && *end != ':' && *end != ';' && *end != ',' &&
+             *end != ' ' && *end != '\t')
+         end++;
+      if ((size_t)(end - token) == expected_len &&
+          strncmp(token, expected, expected_len) == 0)
+         return true;
+      token = end;
+   }
+   return false;
+}
+
+static bool
 exynostools_lsfg_active(void)
 {
-   const char *process = getenv("LSFG_PROCESS");
    const char *config = getenv("LSFG_CONFIG");
-   return process && process[0] != '\0' && config && config[0] != '\0';
+   if (!config || !config[0])
+      return false;
+
+   const char *process = getenv("LSFG_PROCESS");
+   if (process && process[0])
+      return true;
+
+   static const char layer[] = "VK_LAYER_LS_frame_generation";
+   return exynostools_env_list_contains("VK_INSTANCE_LAYERS", layer) ||
+          exynostools_env_list_contains("VK_LOADER_LAYERS_ENABLE", layer);
 }
 '''
     s = replace_once(s, helper_marker, "\n" + helper + helper_marker,
@@ -119,6 +157,9 @@ exynostools_lsfg_active(void)
     final = device.read_text()
     postconditions = (
         "exynostools_lsfg_active",
+        'VK_LAYER_LS_frame_generation',
+        'VK_INSTANCE_LAYERS',
+        'VK_LOADER_LAYERS_ENABLE',
         "ExynosTools LSFG: preserving shared-device feature chain",
         "ExynosTools LSFG: refusing NULL-pNext fallback",
         "if (exynostools_lsfg_active())\n      return false;",

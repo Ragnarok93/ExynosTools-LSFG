@@ -1,5 +1,6 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_layer.h>
+#include <vulkan/utility/vk_safe_struct.hpp>
 
 #include <dlfcn.h>
 #ifdef __ANDROID__
@@ -170,6 +171,213 @@ const void* strip_synthetic_device_link(const void* pNext) {
     return pNext;
 }
 
+VkPhysicalDeviceFeatures2* find_features2_in_chain(void* pNext) {
+#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2
+    for (auto* node = reinterpret_cast<VkBaseOutStructure*>(pNext);
+         node;
+         node = node->pNext) {
+        if (node->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2) {
+            return reinterpret_cast<VkPhysicalDeviceFeatures2*>(node);
+        }
+    }
+#else
+    (void)pNext;
+#endif
+    return nullptr;
+}
+
+const VkPhysicalDeviceFeatures* requested_core_features(const VkDeviceCreateInfo* create_info) {
+    if (!create_info) return nullptr;
+    if (create_info->pEnabledFeatures) return create_info->pEnabledFeatures;
+#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2
+    for (const auto* node = reinterpret_cast<const VkBaseInStructure*>(create_info->pNext);
+         node;
+         node = node->pNext) {
+        if (node->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2) {
+            return &reinterpret_cast<const VkPhysicalDeviceFeatures2*>(node)->features;
+        }
+    }
+#endif
+    return nullptr;
+}
+
+bool query_samsung_core_features(
+    VkPhysicalDevice physicalDevice,
+    VkPhysicalDeviceFeatures* out_features) {
+    if (!out_features || !g_runtime.samsung_device || g_runtime.last_instance == VK_NULL_HANDLE) {
+        return false;
+    }
+    auto get_features = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures>(
+        g_runtime.samsung_device->GetInstanceProcAddr(
+            g_runtime.last_instance,
+            "vkGetPhysicalDeviceFeatures"));
+    if (!get_features) return false;
+    *out_features = {};
+    get_features(physicalDevice, out_features);
+    return true;
+}
+
+bool query_layer_core_features(
+    VkPhysicalDevice physicalDevice,
+    VkPhysicalDeviceFeatures* out_features) {
+    if (!out_features || !g_runtime.layer_gipa || g_runtime.last_instance == VK_NULL_HANDLE) {
+        return false;
+    }
+    auto get_features = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures>(
+        g_runtime.layer_gipa(g_runtime.last_instance, "vkGetPhysicalDeviceFeatures"));
+    if (!get_features) return false;
+    *out_features = {};
+    get_features(physicalDevice, out_features);
+    return true;
+}
+
+struct VirtualBcConsumeResult {
+    bool virtualized = false;
+    bool legacy = false;
+    bool features2 = false;
+};
+
+VirtualBcConsumeResult consume_virtual_bc_device_feature(
+    VkPhysicalDevice physicalDevice,
+    vku::safe_VkDeviceCreateInfo* safe_create_info) {
+    VirtualBcConsumeResult consumed{};
+    if (!safe_create_info) return consumed;
+
+    VkPhysicalDeviceFeatures samsung_features{};
+    VkPhysicalDeviceFeatures advertised_features{};
+    if (!query_samsung_core_features(physicalDevice, &samsung_features) ||
+        !query_layer_core_features(physicalDevice, &advertised_features)) {
+        shim_log_error("Unable to compare advertised/native BC feature state; leaving request unchanged");
+        return consumed;
+    }
+
+    consumed.virtualized = advertised_features.textureCompressionBC == VK_TRUE &&
+                           samsung_features.textureCompressionBC == VK_FALSE;
+    if (!consumed.virtualized) return consumed;
+
+    VkDeviceCreateInfo* create_info = safe_create_info->ptr();
+    if (!create_info) return consumed;
+
+    if (create_info->pEnabledFeatures &&
+        create_info->pEnabledFeatures->textureCompressionBC == VK_TRUE) {
+        auto* features = const_cast<VkPhysicalDeviceFeatures*>(create_info->pEnabledFeatures);
+        features->textureCompressionBC = VK_FALSE;
+        consumed.legacy = true;
+    }
+
+    VkPhysicalDeviceFeatures2* features2 =
+        find_features2_in_chain(const_cast<void*>(create_info->pNext));
+    if (features2 && features2->features.textureCompressionBC == VK_TRUE) {
+        features2->features.textureCompressionBC = VK_FALSE;
+        consumed.features2 = true;
+    }
+
+#ifdef __ANDROID__
+    if (consumed.legacy || consumed.features2) {
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "Consumed virtual textureCompressionBC device feature before Samsung vkCreateDevice (legacy=%d features2=%d)",
+            consumed.legacy ? 1 : 0,
+            consumed.features2 ? 1 : 0);
+    }
+#endif
+    return consumed;
+}
+
+void log_feature_not_present_diagnostics(
+    VkPhysicalDevice physicalDevice,
+    const VkDeviceCreateInfo* create_info) {
+#ifdef __ANDROID__
+    VkPhysicalDeviceFeatures native_features{};
+    if (query_samsung_core_features(physicalDevice, &native_features)) {
+        const VkPhysicalDeviceFeatures* requested = requested_core_features(create_info);
+        if (requested) {
+#define LOG_UNSUPPORTED_CORE_FEATURE(name) \
+            do { \
+                if (requested->name == VK_TRUE && native_features.name == VK_FALSE) { \
+                    __android_log_print(ANDROID_LOG_ERROR, kLogTag, \
+                        "Samsung missing requested core feature: %s", #name); \
+                } \
+            } while (0)
+            LOG_UNSUPPORTED_CORE_FEATURE(robustBufferAccess);
+            LOG_UNSUPPORTED_CORE_FEATURE(fullDrawIndexUint32);
+            LOG_UNSUPPORTED_CORE_FEATURE(imageCubeArray);
+            LOG_UNSUPPORTED_CORE_FEATURE(independentBlend);
+            LOG_UNSUPPORTED_CORE_FEATURE(geometryShader);
+            LOG_UNSUPPORTED_CORE_FEATURE(tessellationShader);
+            LOG_UNSUPPORTED_CORE_FEATURE(sampleRateShading);
+            LOG_UNSUPPORTED_CORE_FEATURE(dualSrcBlend);
+            LOG_UNSUPPORTED_CORE_FEATURE(logicOp);
+            LOG_UNSUPPORTED_CORE_FEATURE(multiDrawIndirect);
+            LOG_UNSUPPORTED_CORE_FEATURE(drawIndirectFirstInstance);
+            LOG_UNSUPPORTED_CORE_FEATURE(depthClamp);
+            LOG_UNSUPPORTED_CORE_FEATURE(depthBiasClamp);
+            LOG_UNSUPPORTED_CORE_FEATURE(fillModeNonSolid);
+            LOG_UNSUPPORTED_CORE_FEATURE(depthBounds);
+            LOG_UNSUPPORTED_CORE_FEATURE(wideLines);
+            LOG_UNSUPPORTED_CORE_FEATURE(largePoints);
+            LOG_UNSUPPORTED_CORE_FEATURE(alphaToOne);
+            LOG_UNSUPPORTED_CORE_FEATURE(multiViewport);
+            LOG_UNSUPPORTED_CORE_FEATURE(samplerAnisotropy);
+            LOG_UNSUPPORTED_CORE_FEATURE(textureCompressionETC2);
+            LOG_UNSUPPORTED_CORE_FEATURE(textureCompressionASTC_LDR);
+            LOG_UNSUPPORTED_CORE_FEATURE(textureCompressionBC);
+            LOG_UNSUPPORTED_CORE_FEATURE(occlusionQueryPrecise);
+            LOG_UNSUPPORTED_CORE_FEATURE(pipelineStatisticsQuery);
+            LOG_UNSUPPORTED_CORE_FEATURE(vertexPipelineStoresAndAtomics);
+            LOG_UNSUPPORTED_CORE_FEATURE(fragmentStoresAndAtomics);
+            LOG_UNSUPPORTED_CORE_FEATURE(shaderTessellationAndGeometryPointSize);
+            LOG_UNSUPPORTED_CORE_FEATURE(shaderImageGatherExtended);
+            LOG_UNSUPPORTED_CORE_FEATURE(shaderStorageImageExtendedFormats);
+            LOG_UNSUPPORTED_CORE_FEATURE(shaderStorageImageMultisample);
+            LOG_UNSUPPORTED_CORE_FEATURE(shaderStorageImageReadWithoutFormat);
+            LOG_UNSUPPORTED_CORE_FEATURE(shaderStorageImageWriteWithoutFormat);
+            LOG_UNSUPPORTED_CORE_FEATURE(shaderUniformBufferArrayDynamicIndexing);
+            LOG_UNSUPPORTED_CORE_FEATURE(shaderSampledImageArrayDynamicIndexing);
+            LOG_UNSUPPORTED_CORE_FEATURE(shaderStorageBufferArrayDynamicIndexing);
+            LOG_UNSUPPORTED_CORE_FEATURE(shaderStorageImageArrayDynamicIndexing);
+            LOG_UNSUPPORTED_CORE_FEATURE(shaderClipDistance);
+            LOG_UNSUPPORTED_CORE_FEATURE(shaderCullDistance);
+            LOG_UNSUPPORTED_CORE_FEATURE(shaderFloat64);
+            LOG_UNSUPPORTED_CORE_FEATURE(shaderInt64);
+            LOG_UNSUPPORTED_CORE_FEATURE(shaderInt16);
+            LOG_UNSUPPORTED_CORE_FEATURE(shaderResourceResidency);
+            LOG_UNSUPPORTED_CORE_FEATURE(shaderResourceMinLod);
+            LOG_UNSUPPORTED_CORE_FEATURE(sparseBinding);
+            LOG_UNSUPPORTED_CORE_FEATURE(sparseResidencyBuffer);
+            LOG_UNSUPPORTED_CORE_FEATURE(sparseResidencyImage2D);
+            LOG_UNSUPPORTED_CORE_FEATURE(sparseResidencyImage3D);
+            LOG_UNSUPPORTED_CORE_FEATURE(sparseResidency2Samples);
+            LOG_UNSUPPORTED_CORE_FEATURE(sparseResidency4Samples);
+            LOG_UNSUPPORTED_CORE_FEATURE(sparseResidency8Samples);
+            LOG_UNSUPPORTED_CORE_FEATURE(sparseResidency16Samples);
+            LOG_UNSUPPORTED_CORE_FEATURE(sparseResidencyAliased);
+            LOG_UNSUPPORTED_CORE_FEATURE(variableMultisampleRate);
+            LOG_UNSUPPORTED_CORE_FEATURE(inheritedQueries);
+#undef LOG_UNSUPPORTED_CORE_FEATURE
+        }
+    }
+
+    uint32_t index = 0;
+    for (const auto* node = create_info
+             ? reinterpret_cast<const VkBaseInStructure*>(create_info->pNext)
+             : nullptr;
+         node;
+         node = node->pNext, ++index) {
+        __android_log_print(
+            ANDROID_LOG_ERROR,
+            kLogTag,
+            "Samsung rejected device feature pNext[%u] sType=%d",
+            index,
+            static_cast<int>(node->sType));
+    }
+#else
+    (void)physicalDevice;
+    (void)create_info;
+#endif
+}
+
 void log_requested_instance_extensions(const VkInstanceCreateInfo* create_info) {
 #ifdef __ANDROID__
     if (!create_info) return;
@@ -312,11 +520,11 @@ bool load_exynos_layer() {
 }
 
 void initialize_runtime() {
-    shim_log("r5 initializing Android Vulkan HAL shim");
+    shim_log("r6 initializing Android Vulkan HAL shim");
     if (!open_real_samsung_hal()) return;
     if (!load_exynos_layer()) return;
     g_runtime.ready = true;
-    shim_log("r5 Android Vulkan HAL shim ready");
+    shim_log("r6 Android Vulkan HAL shim ready");
 }
 
 bool ensure_runtime() {
@@ -373,14 +581,33 @@ VKAPI_ATTR VkResult VKAPI_CALL real_CreateDevice(
         return VK_ERROR_INITIALIZATION_FAILED;
     }
 
-    VkDeviceCreateInfo clean = *pCreateInfo;
-    clean.pNext = strip_synthetic_device_link(pCreateInfo->pNext);
+    // The hosted ExynosTools layer may intentionally advertise BC support that
+    // Samsung does not expose natively. Deep-clone the application chain after
+    // removing our synthetic loader record, then consume only that virtualized
+    // core feature before entering the real Samsung HAL. All other requested
+    // features/extensions remain byte-for-byte represented in the safe clone.
+    VkDeviceCreateInfo clean_input = *pCreateInfo;
+    clean_input.pNext = strip_synthetic_device_link(pCreateInfo->pNext);
+    vku::safe_VkDeviceCreateInfo clean(&clean_input);
+    const VirtualBcConsumeResult consumed =
+        consume_virtual_bc_device_feature(physicalDevice, &clean);
+
     VkResult result = g_runtime.samsung_create_device(
         physicalDevice,
-        &clean,
+        clean.ptr(),
         pAllocator,
         pDevice);
     shim_log_result("Samsung HAL vkCreateDevice", result);
+    if (result == VK_ERROR_FEATURE_NOT_PRESENT) {
+#ifdef __ANDROID__
+        __android_log_print(
+            ANDROID_LOG_ERROR,
+            kLogTag,
+            "Samsung HAL still reports VK_ERROR_FEATURE_NOT_PRESENT after virtual-BC consume=%d",
+            (consumed.legacy || consumed.features2) ? 1 : 0);
+#endif
+        log_feature_not_present_diagnostics(physicalDevice, clean.ptr());
+    }
     return result;
 }
 

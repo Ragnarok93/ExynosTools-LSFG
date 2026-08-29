@@ -70,10 +70,17 @@ def main():
 
     entry = (root / "src/layer/layer_entry.cpp").read_text(errors="replace")
     compat = (root / "src/layer/layer_lsfg_compat.cpp").read_text(errors="replace")
+    patcher = (root / "ci/patch_gamenative_wrapper_lsfg.py").read_text(errors="replace")
     manifest = (root / "VkLayer_vortek_xclipse.json").read_text(errors="replace")
 
-    require(compat, '"LSFG_PROCESS"', "GameNative process marker")
+    require(compat, '"LSFG_PROCESS"', "legacy GameNative process marker")
     require(compat, '"LSFG_CONFIG"', "GameNative config marker")
+    require(compat, '"VK_INSTANCE_LAYERS"', "targeted legacy loader activation marker")
+    require(compat, '"VK_LOADER_LAYERS_ENABLE"', "targeted modern loader activation marker")
+    require(compat, '"VK_LAYER_LS_frame_generation"', "targeted LSFG layer identity")
+    require(patcher, '"VK_INSTANCE_LAYERS"', "wrapper targeted legacy loader activation")
+    require(patcher, '"VK_LOADER_LAYERS_ENABLE"', "wrapper targeted modern loader activation")
+    require(patcher, '"VK_LAYER_LS_frame_generation"', "wrapper targeted LSFG layer identity")
     require(entry, "!lsfg_process_active", "descriptor-buffer injection disabled for LSFG")
     require(
         entry,

@@ -57,7 +57,14 @@ static void check_device_extensions(VkPhysicalDevice device) {
         VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME,
         "VK_ANDROID_external_memory_android_hardware_buffer",
         VK_EXT_MEMORY_BUDGET_EXTENSION_NAME,
-        VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME
+        VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME,
+        "VK_EXT_robustness2",
+        "VK_EXT_transform_feedback",
+        "VK_KHR_maintenance5",
+        "VK_KHR_maintenance6",
+        "VK_EXT_extended_dynamic_state3",
+        "VK_EXT_graphics_pipeline_library",
+        "VK_EXT_descriptor_buffer"
     };
 
     for (size_t i = 0; i < sizeof(wanted) / sizeof(wanted[0]); ++i)
@@ -85,7 +92,65 @@ static void print_features(VkPhysicalDevice device) {
 
     f2.pNext = &f12;
     f12.pNext = &f13;
+    void **tail = &f13.pNext;
 
+#ifdef VK_EXT_robustness2
+    VkPhysicalDeviceRobustness2FeaturesEXT robustness2;
+    memset(&robustness2, 0, sizeof(robustness2));
+    robustness2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT;
+    *tail = &robustness2;
+    tail = &robustness2.pNext;
+#endif
+
+#ifdef VK_EXT_transform_feedback
+    VkPhysicalDeviceTransformFeedbackFeaturesEXT transform_feedback;
+    memset(&transform_feedback, 0, sizeof(transform_feedback));
+    transform_feedback.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT;
+    *tail = &transform_feedback;
+    tail = &transform_feedback.pNext;
+#endif
+
+#ifdef VK_KHR_maintenance5
+    VkPhysicalDeviceMaintenance5FeaturesKHR maintenance5;
+    memset(&maintenance5, 0, sizeof(maintenance5));
+    maintenance5.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES_KHR;
+    *tail = &maintenance5;
+    tail = &maintenance5.pNext;
+#endif
+
+#ifdef VK_KHR_maintenance6
+    VkPhysicalDeviceMaintenance6FeaturesKHR maintenance6;
+    memset(&maintenance6, 0, sizeof(maintenance6));
+    maintenance6.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_6_FEATURES_KHR;
+    *tail = &maintenance6;
+    tail = &maintenance6.pNext;
+#endif
+
+#ifdef VK_EXT_extended_dynamic_state3
+    VkPhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_state3;
+    memset(&dynamic_state3, 0, sizeof(dynamic_state3));
+    dynamic_state3.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT;
+    *tail = &dynamic_state3;
+    tail = &dynamic_state3.pNext;
+#endif
+
+#ifdef VK_EXT_graphics_pipeline_library
+    VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT graphics_pipeline_library;
+    memset(&graphics_pipeline_library, 0, sizeof(graphics_pipeline_library));
+    graphics_pipeline_library.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT;
+    *tail = &graphics_pipeline_library;
+    tail = &graphics_pipeline_library.pNext;
+#endif
+
+#ifdef VK_EXT_descriptor_buffer
+    VkPhysicalDeviceDescriptorBufferFeaturesEXT descriptor_buffer;
+    memset(&descriptor_buffer, 0, sizeof(descriptor_buffer));
+    descriptor_buffer.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT;
+    *tail = &descriptor_buffer;
+    tail = &descriptor_buffer.pNext;
+#endif
+
+    *tail = NULL;
     vkGetPhysicalDeviceFeatures2(device, &f2);
 
     printf("\n=== Core features ===\n");
@@ -99,6 +164,10 @@ static void print_features(VkPhysicalDevice device) {
            f2.features.multiDrawIndirect ? "YES" : "NO");
     printf("textureCompressionASTC_LDR:   %s\n",
            f2.features.textureCompressionASTC_LDR ? "YES" : "NO");
+    printf("textureCompressionBC:         %s\n",
+           f2.features.textureCompressionBC ? "YES" : "NO");
+    printf("robustBufferAccess:           %s\n",
+           f2.features.robustBufferAccess ? "YES" : "NO");
 
     printf("\n=== Vulkan 1.2 features ===\n");
     printf("timelineSemaphore:            %s\n",
@@ -113,18 +182,90 @@ static void print_features(VkPhysicalDevice device) {
            f12.descriptorBindingPartiallyBound ? "YES" : "NO");
     printf("descriptorBindingVariableDescriptorCount: %s\n",
            f12.descriptorBindingVariableDescriptorCount ? "YES" : "NO");
+    printf("descriptorBindingSampledImageUpdateAfterBind: %s\n",
+           f12.descriptorBindingSampledImageUpdateAfterBind ? "YES" : "NO");
+    printf("descriptorBindingUpdateUnusedWhilePending: %s\n",
+           f12.descriptorBindingUpdateUnusedWhilePending ? "YES" : "NO");
+    printf("vulkanMemoryModel:             %s\n",
+           f12.vulkanMemoryModel ? "YES" : "NO");
+    printf("vulkanMemoryModelDeviceScope:  %s\n",
+           f12.vulkanMemoryModelDeviceScope ? "YES" : "NO");
     printf("shaderFloat16:                  %s\n",
            f12.shaderFloat16 ? "YES" : "NO");
     printf("shaderInt8:                    %s\n",
            f12.shaderInt8 ? "YES" : "NO");
 
     printf("\n=== Vulkan 1.3 features ===\n");
+    printf("robustImageAccess:              %s\n",
+           f13.robustImageAccess ? "YES" : "NO");
     printf("synchronization2:               %s\n",
            f13.synchronization2 ? "YES" : "NO");
     printf("dynamicRendering:               %s\n",
            f13.dynamicRendering ? "YES" : "NO");
     printf("maintenance4:                  %s\n",
            f13.maintenance4 ? "YES" : "NO");
+    printf("subgroupSizeControl:            %s\n",
+           f13.subgroupSizeControl ? "YES" : "NO");
+
+    printf("\n=== DXVK 2.x extension features (advertised, not semantic proof) ===\n");
+#ifdef VK_EXT_robustness2
+    printf("robustBufferAccess2:             %s\n",
+           robustness2.robustBufferAccess2 ? "YES" : "NO");
+    printf("robustImageAccess2:              %s\n",
+           robustness2.robustImageAccess2 ? "YES" : "NO");
+    printf("nullDescriptor:                  %s\n",
+           robustness2.nullDescriptor ? "YES" : "NO");
+#else
+    printf("robustness2 feature structs:     HEADER_UNAVAILABLE\n");
+#endif
+
+#ifdef VK_EXT_transform_feedback
+    printf("transformFeedback:                %s\n",
+           transform_feedback.transformFeedback ? "YES" : "NO");
+    printf("geometryStreams:                  %s\n",
+           transform_feedback.geometryStreams ? "YES" : "NO");
+#else
+    printf("transform feedback structs:       HEADER_UNAVAILABLE\n");
+#endif
+
+#ifdef VK_KHR_maintenance5
+    printf("maintenance5:                     %s\n",
+           maintenance5.maintenance5 ? "YES" : "NO");
+#else
+    printf("maintenance5 structs:             HEADER_UNAVAILABLE\n");
+#endif
+
+#ifdef VK_KHR_maintenance6
+    printf("maintenance6:                     %s\n",
+           maintenance6.maintenance6 ? "YES" : "NO");
+#else
+    printf("maintenance6 structs:             HEADER_UNAVAILABLE\n");
+#endif
+
+#ifdef VK_EXT_extended_dynamic_state3
+    printf("eds3RasterizationSamples:         %s\n",
+           dynamic_state3.extendedDynamicState3RasterizationSamples ? "YES" : "NO");
+    printf("eds3SampleMask:                   %s\n",
+           dynamic_state3.extendedDynamicState3SampleMask ? "YES" : "NO");
+    printf("eds3AlphaToCoverageEnable:        %s\n",
+           dynamic_state3.extendedDynamicState3AlphaToCoverageEnable ? "YES" : "NO");
+#else
+    printf("extended dynamic state3 structs:  HEADER_UNAVAILABLE\n");
+#endif
+
+#ifdef VK_EXT_graphics_pipeline_library
+    printf("graphicsPipelineLibrary:          %s\n",
+           graphics_pipeline_library.graphicsPipelineLibrary ? "YES" : "NO");
+#else
+    printf("graphics pipeline library structs: HEADER_UNAVAILABLE\n");
+#endif
+
+#ifdef VK_EXT_descriptor_buffer
+    printf("descriptorBuffer:                 %s\n",
+           descriptor_buffer.descriptorBuffer ? "YES" : "NO");
+#else
+    printf("descriptor buffer structs:        HEADER_UNAVAILABLE\n");
+#endif
 }
 
 static void print_queue_families(VkPhysicalDevice device) {

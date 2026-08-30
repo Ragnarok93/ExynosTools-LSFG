@@ -29,6 +29,9 @@ jobs:
       - name: Test pinned GameNative contract CLI
         run: python -m unittest discover -s tests -p 'test_lsfg_compat_contract_cli.py' -v
 
+      - name: Test Xclipse DXVK2 policy contract
+        run: python -m unittest discover -s tests -p 'test_dxvk2_xclipse_policy.py' -v
+
       - name: Verify stock GameNative 1.2.0 source contract
         run: |
           python tests/lsfg_compat_contract.py \

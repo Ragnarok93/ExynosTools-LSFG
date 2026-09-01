@@ -41,10 +41,33 @@ class RepositoryProductBoundaryTests(unittest.TestCase):
         self.assertIn('"LSFG_CONFIG"', compat)
         self.assertIn("lsfg_process_environment_present", compat)
 
-    def test_stale_packagers_are_removed(self):
+    def test_stale_packagers_and_patch_helpers_are_removed(self):
         self.assertFalse((ROOT / "scripts/package_driver_release.ps1").exists())
         self.assertFalse((ROOT / "scripts/package_debug_layer_release.ps1").exists())
+        self.assertFalse((ROOT / "tools/apply_lsfg_compat_layer_entry.sh").exists())
         self.assertTrue((ROOT / "scripts/package_emulator_driver.py").is_file())
+
+    def test_dependency_bootstrap_is_single_pinned_path(self):
+        self.assertFalse((ROOT / "scripts/bootstrap_submodules.ps1").exists())
+        self.assertFalse((ROOT / "scripts/configure_android_local_repos.ps1").exists())
+        bootstrap = ROOT / "scripts/bootstrap_vulkan_deps.sh"
+        self.assertTrue(bootstrap.is_file())
+        text = bootstrap.read_text()
+        self.assertIn('VULKAN_TAG="${VULKAN_TAG:-v1.4.341}"', text)
+        self.assertIn("Vulkan-Headers", text)
+        self.assertIn("Vulkan-Utility-Libraries", text)
+
+    def test_generated_products_and_local_deps_are_ignored(self):
+        text = (ROOT / ".gitignore").read_text()
+        for needle in (
+            "dist/",
+            "*.so",
+            "*.zip",
+            "*.wcp",
+            "external/Vulkan-Headers/",
+            "external/Vulkan-Utility-Libraries/",
+        ):
+            self.assertIn(needle, text)
 
 
 if __name__ == "__main__":

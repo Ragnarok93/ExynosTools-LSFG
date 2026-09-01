@@ -1,50 +1,83 @@
-# Android Validation Guide (Step 4)
+# Android Vulkan Layer Validation
 
-This guide validates the layer before game testing.
+This guide validates the **general emulator/Vortek** product built from this
+repository. It does not validate the separate GameNative Mesa Wrapper WCP.
 
-## 1) Build
+## Build
 
-```powershell
-.\scripts\configure_android_local_repos.ps1
+Build the `VkLayer_VortekXclipse` target using the instructions in the root
+README or the `Build General Emulator Vulkan Layer` GitHub Actions workflow.
+
+Expected files:
+
+```text
+build-android/libVkLayer_VortekXclipse.so
+VkLayer_vortek_xclipse.json
 ```
 
-Artifacts:
+## Static ELF checks
 
-- `build-android/libVkLayer_ExynosTools.so`
-- `build-android/VkLayer_exynostools.json`
-
-## 2) Push files to device
-
-```powershell
-adb push build-android/libVkLayer_ExynosTools.so /data/local/tmp/exynostools/
-adb push build-android/VkLayer_exynostools.json /data/local/tmp/exynostools/
-adb push exynostools_config.ini /data/local/tmp/exynostools/
+```bash
+SO=build-android/libVkLayer_VortekXclipse.so
+readelf -h "$SO" | grep -E 'Class:|Type:|Machine:'
+readelf -Ws "$SO" | grep -E \
+  'vkGetInstanceProcAddr|vkGetDeviceProcAddr|vkNegotiateLoaderLayerInterfaceVersion'
+if readelf -d "$SO" | grep -E 'RPATH|RUNPATH'; then
+  echo 'FAIL: non-portable RPATH/RUNPATH'
+  exit 1
+fi
 ```
 
-## 3) Enable validation + ExynosTools layer
+The target must be AArch64 and all three loader entry points must be globally
+visible.
 
-```powershell
-adb shell setprop debug.vulkan.layer_path /data/local/tmp/exynostools
-adb shell setprop debug.vulkan.layers VK_LAYER_KHRONOS_validation:VK_LAYER_EXYNOSTOOLS_bcn
+## Direct Android layer smoke test
+
+Push the layer and manifest to an accessible test directory:
+
+```bash
+adb shell 'mkdir -p /data/local/tmp/exynostools-lsfg'
+adb push build-android/libVkLayer_VortekXclipse.so /data/local/tmp/exynostools-lsfg/
+adb push VkLayer_vortek_xclipse.json /data/local/tmp/exynostools-lsfg/
 ```
 
-Restart the target app after changing properties.
+For a debuggable Vulkan target whose loader honors Android debug-layer
+properties:
 
-Optional: configure the layer either with `exynostools_config.ini` or
-programmatically through `VK_EXT_layer_settings`.
+```bash
+adb shell setprop debug.vulkan.layer_path /data/local/tmp/exynostools-lsfg
+adb shell setprop debug.vulkan.layers VK_LAYER_VORTEK_XCLIPSE
+```
 
-## 4) Inspect logs
+Restart the target application, then inspect logs:
 
-```powershell
+```bash
 adb logcat -c
-adb logcat | findstr /I "ExynosToolsLayer VUID validation"
+adb logcat | grep -Ei 'Vortek|ExynosTools|Vulkan|VUID'
 ```
 
-If you see `VUID-*` messages, fix them before large game tests.
+The important first proof is that the loader discovers
+`VK_LAYER_VORTEK_XCLIPSE` and successfully enters the layer. Only after that
+should game-specific BCn or pipeline behavior be investigated.
 
-## 5) Disable when done
+Disable the test layer when finished:
 
-```powershell
-adb shell setprop debug.vulkan.layers ""
-adb shell setprop debug.vulkan.layer_path ""
+```bash
+adb shell setprop debug.vulkan.layers ''
+adb shell setprop debug.vulkan.layer_path ''
 ```
+
+## Emulator package validation
+
+A standalone custom-driver package needs the matching Samsung backend as well as
+the layer. Create it with:
+
+```bash
+python scripts/package_emulator_driver.py \
+  --build-dir build-android \
+  --backend /path/to/vulkan.samsung.so \
+  --output dist/ExynosTools-LSFG-General-Emulator.zip
+```
+
+Do not test the GameNative `libvulkan_wrapper.so` WCP as though it were this
+product; the loader contracts are different.

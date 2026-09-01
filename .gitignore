@@ -1,25 +1,32 @@
-# Build/output artifacts
+# Build directories
+build/
+build-*/
 build-lsfg/
-layer-test/
+build-lsfg-termux/
+build-rpath-test/
+dist/
+
+# Local dependency checkouts populated by CI/local builds
+external/Vulkan-Headers/
+external/Vulkan-Utility-Libraries/
+
+# Android/Gradle build state
 tests/android_native_probe/.gradle/
 tests/android_native_probe/app/.cxx/
 tests/android_native_probe/app/build/
 tests/android_native_probe/build/
 tests/android_native_probe/.tool-fix-backup/
+tests/android_native_probe/local.properties
 
 # Python cache
 __pycache__/
 *.pyc
 
-# Local Android/Termux configuration
-tests/android_native_probe/local.properties
-
-# Backups
-*.bak
-*.before-*
-*.after-*
-
-# Compiled binaries
+# Generated binaries and packages
+*.so
+*.zip
+*.wcp
+*.apk
 android_vkprobe
 ndk_probe
 vulkan_probe
@@ -37,35 +44,25 @@ vk_sampler_phase2e_pass
 # Generated SPIR-V
 *.spv
 
-# --- ExynosTools-LSFG cleanup (scratch / build artifacts) ---
-# Build directories (Termux/Android and host)
-build-lsfg-termux/
-build-rpath-test/
-build-*/
-
-# Backups
-*.bak-*
-
-# Phase 3C probe backups
-phase3c-*-backup/
-phase3c-restore-backup-*/
-
-# Prebuilt driver bundles and binaries
-gamenative-eden-vortek-xclipse/
-package-vortek-xclipse/
-zip-verify/
-*.so
-*.zip
-
-# Build / probe logs
+# Logs and captured probe output
 *.log
-
-# Xclipse 940 probe capture dumps
 xclipse940-*.txt
 phase3b-*.txt
 phase3c-*.txt
 
-# Root-level probe / reverse-engineering scratch sources
+# Backups and scratch trees
+*.bak
+*.bak-*
+*.before-*
+*.after-*
+phase3c-*-backup/
+phase3c-backup-*/
+phase3c-restore-backup-*/
+gamenative-eden-vortek-xclipse/
+package-vortek-xclipse/
+zip-verify/
+
+# Root-level reverse-engineering scratch sources
 android_vkprobe*.c
 vkprobe.c
 vk_sampler_phase2*.c
@@ -76,18 +73,12 @@ vk_motion_*.c
 vk_motion_oracle_execute.c
 vk_sampled_to_storage.c
 
-# Scratch compute shaders
+# Scratch shaders/helpers
 lsfg_*.comp
 lsfg_sampler_*.comp
-
-# Scratch helper scripts
 apply_phase*.py
 rewrite_motion_oracle.py
 fix_*.sh
 run-motion-sweep.sh
-
-# fix: cover actual phase3c backup dir names + helper script + pipe-named stray
-phase3c-backup-*/
-phase3c-restore-backup-*/
 cleanup-untrack.sh
 *|*

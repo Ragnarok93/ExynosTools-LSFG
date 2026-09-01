@@ -107,19 +107,34 @@ jobs:
           ICD=wrapper-src/_build/src/vulkan/wrapper/wrapper_icd.aarch64.json
           ADRENO=$(find wrapper-src/_build -type f -name 'libadrenotools.so' -print -quit)
           test -s "$SO" && test -s "$ICD" && test -s "$ADRENO"
-          file "$SO" | grep -q 'ARM aarch64'
-          file "$ADRENO" | grep -q 'ARM aarch64'
+          file "$SO" "$ADRENO" | tee wrapper-elf.txt
+          readelf -h "$SO" | grep -q 'Machine:.*AArch64'
+          readelf -h "$ADRENO" | grep -q 'Machine:.*AArch64'
           patchelf --set-rpath '$ORIGIN' "$SO"
           patchelf --set-rpath '$ORIGIN' "$ADRENO"
+          readelf -d "$SO" | tee wrapper-dynamic-final.txt
+          readelf -d "$ADRENO" | tee adrenotools-dynamic-final.txt
+          if cat wrapper-dynamic-final.txt adrenotools-dynamic-final.txt | grep -E 'android_stub|subprojects|/home/runner|wrapper-src'; then
+            echo 'ERROR: build-tree path leaked into GameNative Wrapper ELF'
+            exit 1
+          fi
           readelf -d "$SO" | grep -q 'Shared library: \[libadrenotools.so\]'
           readelf -Ws "$SO" | grep -q 'vk_icdGetInstanceProcAddr'
           readelf -Ws "$SO" | grep -q 'vk_icdNegotiateLoaderICDInterfaceVersion'
           strings "$SO" | grep -q 'ExynosTools LSFG: preserving shared-device feature chain'
           strings "$SO" | grep -q 'ExynosTools LSFG: refusing NULL-pNext fallback'
-          if readelf -d "$SO" | grep -E 'android_stub|subprojects|/home/runner|wrapper-src'; then
-            echo 'ERROR: build-tree path leaked into GameNative Wrapper ELF'
-            exit 1
-          fi
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('wrapper-src/_build/src/vulkan/wrapper/wrapper_icd.aarch64.json')
+          data = json.loads(p.read_text())
+          icd = data.get('ICD', data.get('icd', {}))
+          path = icd.get('library_path') or icd.get('libraryPath')
+          api = str(icd.get('api_version') or icd.get('apiVersion') or '')
+          assert path == '/usr/lib/libvulkan_wrapper.so', (path, data)
+          assert api.startswith('1.3'), (api, data)
+          PY
+          sha256sum "$SO" "$ADRENO" "$ICD" | tee runtime-sha256.txt
 
       - name: Stage minimal GameNative Wrapper WCP
         run: |
@@ -148,14 +163,26 @@ jobs:
           (cd wcp && tar -cJf ../dist/ExynosTools-LSFG-GameNative-1.2.0.wcp profile.json libvulkan_wrapper.so wrapper_icd.aarch64.json libadrenotools.so)
           cp wrapper-base.sha dist/WRAPPER_BASE_SHA.txt
           cp gamenative-120.sha dist/GAMENATIVE_BASE_SHA.txt
+          cp runtime-sha256.txt dist/RUNTIME_SHA256.txt
           sha256sum dist/ExynosTools-LSFG-GameNative-1.2.0.wcp > dist/SHA256SUMS.txt
+          cat > dist/INSTALL.txt <<'TXT'
+          GameNative-only package:
+          1. Import ExynosTools-LSFG-GameNative-1.2.0.wcp through GameNative's Contents Manager.
+          2. Select the ExynosTools-LSFG Wrapper graphics driver in the Bionic container.
+          3. Keep the graphics driver version on System and do not enable the AdrenoTools Turnip path.
+          4. Enable LSFG through GameNative.
+          5. Do not use this WCP as a general emulator/Vortek custom-driver package.
+          TXT
 
       - name: Validate GameNative WCP contract
         run: |
+          set -euxo pipefail
           python exynostools/tests/gamenative_120_wcp_contract.py gamenative-120 dist/ExynosTools-LSFG-GameNative-1.2.0.wcp
           test "$(tar -tJf dist/ExynosTools-LSFG-GameNative-1.2.0.wcp | head -1)" = 'profile.json'
           test "$(tar -tJf dist/ExynosTools-LSFG-GameNative-1.2.0.wcp | grep -c '/')" = '0'
+          tar -xOJf dist/ExynosTools-LSFG-GameNative-1.2.0.wcp profile.json | python -m json.tool >/dev/null
           ! tar -tJf dist/ExynosTools-LSFG-GameNative-1.2.0.wcp | grep -q '^meta.json$'
+          ! tar -tJf dist/ExynosTools-LSFG-GameNative-1.2.0.wcp | grep -E '\.(zip|wcp)$'
 
       - name: Upload GameNative Wrapper WCP
         uses: actions/upload-artifact@v4

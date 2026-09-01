@@ -1,42 +1,69 @@
-# Setup Notes
+# Setup
 
-## 1) Vulkan SDK and shader tools
+ExynosTools-LSFG has two build products. Set up only the one you are working on.
 
-Install a Vulkan SDK/toolchain that provides:
+## General emulator / Vortek Vulkan layer
 
-- Vulkan headers
+Requirements:
+
+- Android NDK
+- CMake + Ninja
 - `glslc`
-- validation layers
+- `patchelf`
+- Vulkan-Headers
+- Vulkan-Utility-Libraries
+- VulkanMemoryAllocator headers
 
-For Android, `glslc` can also come from NDK shader tools.
+CI pins Vulkan-Headers and Vulkan-Utility-Libraries to `v1.4.341` and uses the
+VulkanMemoryAllocator copy already present in `external/`.
 
-## 2) Dependency bootstrap
+For a local build, place matching Vulkan-Headers and Vulkan-Utility-Libraries
+checkouts under:
 
-Use one strategy and keep it consistent:
+```text
+external/Vulkan-Headers
+external/Vulkan-Utility-Libraries
+```
 
-- Local `vulkan_repositories.zip` extract (fastest in this workspace), or
-- Git submodules, or
-- vcpkg in manifest mode.
+then configure:
 
-For the local bundle route, point CMake to:
+```bash
+cmake -S . -B build-android -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+  -DANDROID_ABI=arm64-v8a \
+  -DANDROID_PLATFORM=android-29 \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DEXYNOS_LAYER_USE_SUBMODULE_DEPS=ON \
+  -DEXYNOS_LAYER_USE_LOCAL_VULKAN_REPOS=OFF \
+  -DEXYNOS_LAYER_BUILD_SHADERS=ON \
+  -DEXYNOS_LAYER_EMBED_SHADERS=ON
 
-- `EXYNOS_VULKAN_REPOS_ROOT=<...>/vulkan_repositories_extracted/vulkan_repos`
+cmake --build build-android --target VkLayer_VortekXclipse -j2
+```
 
-Note: the current bundle does not include full `Vulkan-Headers`, so Vulkan headers must come from Vulkan SDK or a separate `Vulkan-Headers` checkout.
+The output is `build-android/libVkLayer_VortekXclipse.so`.
 
-## 3) Why this architecture
+Use `scripts/package_emulator_driver.py` to package it. A complete standalone
+emulator bundle requires the matching Samsung `vulkan.samsung.so` backend;
+layer-only packages are for CI or launchers that already supply that backend.
 
-This restart uses a **Vulkan Layer** instead of a custom ICD wrapper to avoid:
+## GameNative LSFG Wrapper
 
-- conflicting loader contracts
-- duplicated Vulkan bridge implementations
-- unstable boot behavior from architecture mixing
+The GameNative product is built by
+`.github/workflows/build-gamenative-wrapper.yml`. It intentionally uses the
+pinned `leegao/mesa-wrapper-CI` source and produces a GameNative `Wrapper` WCP.
+It does not compile `src/layer/` and must not be used to validate the general
+Vortek layer.
 
-## 4) Validation-first workflow
+See `docs/LSFG_GAMENATIVE_INTEGRATION.md` for that integration boundary.
 
-Before game testing:
+## Validation rule
 
-1. Build layer.
-2. Enable validation layers.
-3. Run a minimal Vulkan sample.
-4. Fix all validation errors before integrating BCn decode work.
+Before game testing, prove which product was loaded:
+
+- General emulator path: `VK_LAYER_VORTEK_XCLIPSE` /
+  `libVkLayer_VortekXclipse.so`.
+- GameNative path: Wrapper ICD / `libvulkan_wrapper.so`, with GameNative owning
+  LSFG layer installation and environment setup.
+
+Do not infer one product's health from the other product's build result.

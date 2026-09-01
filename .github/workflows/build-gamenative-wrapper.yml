@@ -1,0 +1,167 @@
+name: Build GameNative LSFG Wrapper WCP
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-gamenative-wrapper.yml'
+      - 'ci/patch_gamenative_wrapper_lsfg.py'
+      - 'tests/gamenative_120_wcp_contract.py'
+      - 'tests/lsfg_compat_contract.py'
+      - 'tests/test_lsfg_compat_contract_cli.py'
+      - 'docs/LSFG_GAMENATIVE_INTEGRATION.md'
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gamenative-lsfg-wrapper-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-wrapper-wcp:
+    name: Stock GameNative 1.2.0 / ARM64 Wrapper WCP
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout ExynosTools-LSFG integration sources
+        uses: actions/checkout@v4
+        with:
+          path: exynostools
+
+      - name: Pin and verify stock GameNative 1.2.0
+        run: |
+          git clone --depth 1 --branch v1.2.0 https://github.com/utkarshdalal/GameNative.git gamenative-120
+          GN_SHA=$(git -C gamenative-120 rev-parse HEAD)
+          echo "$GN_SHA" | tee gamenative-120.sha
+          test "$GN_SHA" = '3491226faedb7222a5f8b7248c0247957a060836'
+          grep -q 'CONTENT_TYPE_WRAPPER("Wrapper")' gamenative-120/app/src/main/java/com/winlator/contents/ContentProfile.java
+          grep -q 'WRAPPER_TRUST_FILES' gamenative-120/app/src/main/java/com/winlator/contents/ContentsManager.java
+          grep -q 'v1.3.3-android-arm64-v8a' gamenative-120/app/src/main/java/app/gamenative/utils/LsfgVkManager.kt
+          grep -q 'LSFG_PROCESS' gamenative-120/app/src/main/java/app/gamenative/utils/LsfgVkManager.kt
+          grep -q 'LSFG_CONFIG' gamenative-120/app/src/main/java/app/gamenative/utils/LsfgVkManager.kt
+          grep -q 'VK_LAYER_PATH' gamenative-120/app/src/main/java/app/gamenative/utils/LsfgVkManager.kt
+
+      - name: Pin GameNative Mesa wrapper source
+        run: |
+          mkdir wrapper-src
+          git -C wrapper-src init
+          git -C wrapper-src remote add origin https://github.com/leegao/mesa-wrapper-CI.git
+          git -C wrapper-src fetch --depth 1 origin 417776cc61eb137f0f22f24292f528d396c7189a
+          git -C wrapper-src checkout --detach FETCH_HEAD
+          WRAPPER_SHA=$(git -C wrapper-src rev-parse HEAD)
+          echo "$WRAPPER_SHA" | tee wrapper-base.sha
+          test "$WRAPPER_SHA" = '417776cc61eb137f0f22f24292f528d396c7189a'
+
+      - name: Apply Android fixes and LSFG shared-device hardening
+        run: |
+          sed -i 's/#if defined(HAVE_MEMFD_CREATE) \&\& !defined __TERMUX__/#if defined(HAVE_MEMFD_CREATE)/' wrapper-src/src/util/anon_file.c
+          sed -i "s/dep_libudev = dependency('libudev', required : false)/dep_libudev = null_dep/g" wrapper-src/meson.build
+          python exynostools/ci/patch_gamenative_wrapper_lsfg.py wrapper-src
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install mako PyYAML meson ninja packaging
+          sudo apt-get update
+          sudo apt-get install -y patchelf xz-utils
+
+      - name: Generate Android cross file
+        working-directory: wrapper-src
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          export MESON_WORKING_DIR="$PWD"
+          envsubst < android.toml > android-cross.toml
+          CLANG_VER=$(basename "$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/* | sort -V | tail -1)")
+          sed -i "s|lib/clang/18|lib/clang/$CLANG_VER|g" android-cross.toml
+
+      - name: Configure and compile GameNative Wrapper ICD
+        working-directory: wrapper-src
+        run: |
+          meson setup _build \
+            --cross-file android-cross.toml \
+            --prefix=/usr --libdir=lib \
+            -Dbuildtype=release \
+            -Dplatforms=android,x11 \
+            -Dandroid-stub=true \
+            -Dandroid-libbacktrace=disabled \
+            -Dplatform-sdk-version=30 \
+            -Dglx=disabled -Dgbm=disabled -Degl=disabled \
+            -Dopengl=false -Dgles1=disabled -Dgles2=disabled \
+            -Dglvnd=disabled -Dllvm=disabled -Dvalgrind=disabled \
+            -Dgallium-drivers= -Dshared-glapi=disabled -Dzstd=disabled \
+            -Dvulkan-drivers=wrapper
+          meson compile -C _build
+
+      - name: Normalize and validate wrapper runtime linkage
+        run: |
+          set -euxo pipefail
+          SO=wrapper-src/_build/src/vulkan/wrapper/libvulkan_wrapper.so
+          ICD=wrapper-src/_build/src/vulkan/wrapper/wrapper_icd.aarch64.json
+          ADRENO=$(find wrapper-src/_build -type f -name 'libadrenotools.so' -print -quit)
+          test -s "$SO" && test -s "$ICD" && test -s "$ADRENO"
+          file "$SO" | grep -q 'ARM aarch64'
+          file "$ADRENO" | grep -q 'ARM aarch64'
+          patchelf --set-rpath '$ORIGIN' "$SO"
+          patchelf --set-rpath '$ORIGIN' "$ADRENO"
+          readelf -d "$SO" | grep -q 'Shared library: \[libadrenotools.so\]'
+          readelf -Ws "$SO" | grep -q 'vk_icdGetInstanceProcAddr'
+          readelf -Ws "$SO" | grep -q 'vk_icdNegotiateLoaderICDInterfaceVersion'
+          strings "$SO" | grep -q 'ExynosTools LSFG: preserving shared-device feature chain'
+          strings "$SO" | grep -q 'ExynosTools LSFG: refusing NULL-pNext fallback'
+          if readelf -d "$SO" | grep -E 'android_stub|subprojects|/home/runner|wrapper-src'; then
+            echo 'ERROR: build-tree path leaked into GameNative Wrapper ELF'
+            exit 1
+          fi
+
+      - name: Stage minimal GameNative Wrapper WCP
+        run: |
+          set -euxo pipefail
+          rm -rf wcp dist
+          mkdir -p wcp dist
+          SO=wrapper-src/_build/src/vulkan/wrapper/libvulkan_wrapper.so
+          ICD=wrapper-src/_build/src/vulkan/wrapper/wrapper_icd.aarch64.json
+          ADRENO=$(find wrapper-src/_build -type f -name 'libadrenotools.so' -print -quit)
+          cp "$SO" wcp/libvulkan_wrapper.so
+          cp "$ICD" wcp/wrapper_icd.aarch64.json
+          cp "$ADRENO" wcp/libadrenotools.so
+          cat > wcp/profile.json <<'JSON'
+          {
+            "type": "Wrapper",
+            "versionName": "ExynosTools-LSFG",
+            "versionCode": 2026090101,
+            "description": "GameNative-only Xclipse-compatible Vulkan Wrapper for stock GameNative 1.2.0 + LSFG v1.3.3. This is not the general emulator/Vortek driver package.",
+            "files": [
+              {"source": "libvulkan_wrapper.so", "target": "${libdir}/libvulkan_wrapper.so"},
+              {"source": "wrapper_icd.aarch64.json", "target": "${sharedir}/vulkan/icd.d/wrapper_icd.aarch64.json"},
+              {"source": "libadrenotools.so", "target": "${libdir}/libadrenotools.so"}
+            ]
+          }
+          JSON
+          (cd wcp && tar -cJf ../dist/ExynosTools-LSFG-GameNative-1.2.0.wcp profile.json libvulkan_wrapper.so wrapper_icd.aarch64.json libadrenotools.so)
+          cp wrapper-base.sha dist/WRAPPER_BASE_SHA.txt
+          cp gamenative-120.sha dist/GAMENATIVE_BASE_SHA.txt
+          sha256sum dist/ExynosTools-LSFG-GameNative-1.2.0.wcp > dist/SHA256SUMS.txt
+
+      - name: Validate GameNative WCP contract
+        run: |
+          python exynostools/tests/gamenative_120_wcp_contract.py gamenative-120 dist/ExynosTools-LSFG-GameNative-1.2.0.wcp
+          test "$(tar -tJf dist/ExynosTools-LSFG-GameNative-1.2.0.wcp | head -1)" = 'profile.json'
+          test "$(tar -tJf dist/ExynosTools-LSFG-GameNative-1.2.0.wcp | grep -c '/')" = '0'
+          ! tar -tJf dist/ExynosTools-LSFG-GameNative-1.2.0.wcp | grep -q '^meta.json$'
+
+      - name: Upload GameNative Wrapper WCP
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExynosTools-LSFG-GameNative-Wrapper-${{ github.sha }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9
